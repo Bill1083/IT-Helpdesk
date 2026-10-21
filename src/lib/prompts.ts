@@ -1,7 +1,8 @@
 import { DANGER_LEVELS } from '@/lib/commands';
 import { modeLabel } from '@/lib/modes';
+import { outcomeLabel } from '@/lib/outcomes';
 import { PLAYBOOKS, playbooksFor } from '@/lib/playbooks';
-import type { Environment, Mode, Problem, ReportKind, SimilarProblem } from '@/lib/types';
+import type { Environment, Mode, Problem, ReportKind, ResolutionKind, SimilarProblem } from '@/lib/types';
 
 /** Stack of the first client; each environment gets its own copy to edit. */
 export const DEFAULT_ENVIRONMENT = `- Identity & productivity: both Google Workspace and Microsoft 365 / Entra ID are in use - check which one a given app or account is tied to.
@@ -32,6 +33,7 @@ FIX - something is broken:
   **You should see:** <expected result, one line>
   **If not:** <one alternative, one line>        <- optional
 - When the admin reports it worked: one or two sentences on what fixed it and suggest marking it resolved. When they could not do a step: a different route to the same check.
+- When the admin asks a question or adds detail about the current step (the context says so), do not move on: answer in one to three sentences, then give the revised step with the same number.
 
 HOW-TO - how to do something, or how something works:
 - One-line answer first. For a task, then "### <Task name>" with the complete numbered procedure if it fits in about 8 steps (otherwise the first stage, and say what comes next), and an optional "**Good to know:**" line with one gotcha. For "how does X work", 3-6 short sentences or bullets.
@@ -83,9 +85,11 @@ export function problemBlock(problem: Problem, similar: SimilarProblem[], enviro
       const where = [formatDate(s.createdAt), s.environmentName && `client: ${s.environmentName}`, s.reporter && `reported by ${s.reporter}`]
         .filter(Boolean)
         .join(', ');
+      const outcome = s.status === 'resolved' ? outcomeLabel(s.resolutionKind ?? 'fixed') : 'still open';
       lines.push(
-        `- ${where} (${s.status}): ${s.summary || s.title || s.description.slice(0, 200)}` +
-          (s.resolution ? `\n  What fixed it: ${s.resolution}` : '\n  Not resolved at the time.'),
+        `- ${where} (${outcome}): ${s.summary || s.title || s.description.slice(0, 200)}` +
+          (s.reason ? `\n  Why it matches: ${s.reason}` : '') +
+          (s.resolution ? `\n  Outcome: ${s.resolution}` : '\n  Not resolved at the time.'),
       );
     }
   }
@@ -99,6 +103,8 @@ const REPORT_LABEL: Record<ReportKind, string> = {
   error: 'Result: got a different error.',
   cant: "Result: couldn't do this step.",
   note: '',
+  clarify: 'Question or extra detail about the current step:',
+  closed: 'Closed.',
 };
 
 export function reportText(kind: string, content: string): string {
@@ -111,6 +117,7 @@ export function turnContext(opts: {
   mode: Mode;
   modeLocked: boolean;
   stepNumber: number;
+  revising: boolean;
   researchBrief: string | null;
   researching: boolean;
 }): string {
@@ -121,7 +128,13 @@ export function turnContext(opts: {
       ? `- Request type: ${type} (chosen by the admin).`
       : `- Request type: ${type} (best guess - use another type if the request is clearly different).`,
   ];
-  if (opts.mode === 'fix') parts.push(`- If you give a step, it is step ${opts.stepNumber}.`);
+  if (opts.mode === 'fix' && opts.revising) {
+    parts.push(
+      `- The admin's latest message is a question or extra detail about step ${opts.stepNumber}, not a result. Do not move on. Answer it briefly if it is a question, then give the revised step ${opts.stepNumber} (same number, with its ### heading) adjusted for what they said. If the step doesn't need to change, say so and restate it briefly.`,
+    );
+  } else if (opts.mode === 'fix') {
+    parts.push(`- If you give a step, it is step ${opts.stepNumber}.`);
+  }
   if (opts.researchBrief) {
     parts.push(`- Background research brief (web research on this request):\n${opts.researchBrief}`);
   } else if (opts.researching) {
@@ -164,15 +177,72 @@ export const RESOLUTION_SCHEMA = {
   properties: {
     resolution: {
       type: 'string',
-      description: 'One or two sentences: what fixed it or what was decided, concrete enough to reuse next time.',
+      description:
+        'One or two sentences on the outcome, concrete enough to reuse: what fixed it, the workaround, what was decided, or (if not fixed) what was ruled out.',
+    },
+    root_cause: {
+      type: 'string',
+      description: 'The underlying cause in one sentence, only if the transcript actually established it. Otherwise an empty string.',
     },
     summary: { type: 'string', description: 'One or two sentence high-level description of the request, no person names.' },
+    highlights: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '2 to 5 short bullets (max 18 words each) recapping what was tried, learned or decided, in order.',
+    },
   },
-  required: ['resolution', 'summary'],
+  required: ['resolution', 'root_cause', 'summary', 'highlights'],
 };
 
-export function resolutionPrompt(transcript: string, note: string): string {
-  return `This IT request has just been closed. From the transcript, write what fixed it (or what was decided) so it can be reused next time.\n\nAdmin's closing note: ${note.trim() || '(none)'}\n\nTranscript:\n${transcript.slice(-12000)}`;
+const OUTCOME_BRIEF: Record<ResolutionKind, string> = {
+  fixed: 'Fixed, and the admin believes the cause is known.',
+  fixed_unknown: 'Fixed, but the cause was never found. Leave root_cause empty unless the transcript clearly proves it.',
+  workaround: 'A workaround is in place; the underlying problem is not fixed.',
+  unresolved: 'Closed without a fix. Say what was ruled out so the next attempt starts further on.',
+  done: 'A how-to, plan or decision that is complete.',
+};
+
+export function resolutionPrompt(transcript: string, note: string, outcome: ResolutionKind): string {
+  return `This IT request has just been closed. Recap it so it can be reused next time.
+
+Outcome chosen by the admin: ${OUTCOME_BRIEF[outcome]}
+Admin's closing note: ${note.trim() || '(none)'}
+
+Transcript:
+${transcript.slice(-12000)}`;
+}
+
+/* ------------------------------------------------ "seen before" relevance */
+
+export const RELEVANCE_SCHEMA = {
+  type: 'object',
+  properties: {
+    matches: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          index: { type: 'integer' },
+          relevant: { type: 'boolean' },
+          reason: { type: 'string', description: 'If relevant: why, in at most 15 words. Otherwise empty.' },
+        },
+        required: ['index', 'relevant', 'reason'],
+      },
+    },
+  },
+  required: ['matches'],
+};
+
+export function relevancePrompt(request: string, candidates: { index: number; text: string }[]): string {
+  return `An IT admin got a new request. Decide which past problems from their history are genuinely the same issue or so closely related that the past outcome would directly help now.
+
+Be strict: the same product or a similar symptom is not enough (two different Slack problems are not related). Mark relevant only if the root problem, symptoms and context clearly line up.
+
+New request:
+${request.slice(0, 3000)}
+
+Past problems:
+${candidates.map((c) => `[${c.index}] ${c.text}`).join('\n\n')}`;
 }
 
 export function userMessagePrompt(step: string, reporter: string | null): string {

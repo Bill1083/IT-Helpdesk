@@ -113,6 +113,12 @@ const MIGRATIONS: (string | ((db: Database.Database) => void))[] = [
     db.prepare(`UPDATE problems SET environment_id = 'default'`).run();
     db.prepare(`DELETE FROM settings WHERE key = 'environment'`).run();
   },
+  // 4: how a chat was closed, the cause if found, and a short recap.
+  `
+  ALTER TABLE problems ADD COLUMN resolution_kind TEXT;
+  ALTER TABLE problems ADD COLUMN root_cause TEXT;
+  ALTER TABLE problems ADD COLUMN highlights TEXT NOT NULL DEFAULT '[]';
+  `,
 ];
 
 declare global {

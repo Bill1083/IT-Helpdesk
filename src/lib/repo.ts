@@ -17,6 +17,7 @@ import type {
   Provider,
   RelatedMatch,
   ResearchStatus,
+  ResolutionKind,
   SavedCommand,
   Source,
 } from '@/lib/types';
@@ -53,6 +54,9 @@ function toProblem(row: Row): Problem {
     status: row.status as ProblemStatus,
     summary: (row.summary as string | null) ?? null,
     resolution: (row.resolution as string | null) ?? null,
+    resolutionKind: (row.resolution_kind as ResolutionKind | null) ?? null,
+    rootCause: (row.root_cause as string | null) ?? null,
+    highlights: parseJson<string[]>(row.highlights, []),
     researchStatus: row.research_status as ResearchStatus,
     researchHeadline: (row.research_headline as string | null) ?? null,
     researchBrief: (row.research_brief as string | null) ?? null,
@@ -81,7 +85,7 @@ function toMessage(row: Row): Message {
   };
 }
 
-const PROBLEM_COLUMNS = `id, title, description, reporter, environment_id, mode, mode_locked, categories, status, summary, resolution,
+const PROBLEM_COLUMNS = `id, title, description, reporter, environment_id, mode, mode_locked, categories, status, summary, resolution, resolution_kind, root_cause, highlights,
   research_status, research_headline, research_brief, research_sources, research_queries,
   research_updated_at, related, created_at, updated_at, resolved_at`;
 
@@ -175,7 +179,7 @@ export function listProblems(opts: { q?: string; limit?: number } = {}): Problem
   const db = getDb();
   const limit = opts.limit ?? 200;
   const query = opts.q ? ftsQuery(opts.q) : null;
-  const columns = `p.id, p.title, p.description, p.reporter, p.environment_id, p.mode, p.status, p.created_at, p.updated_at`;
+  const columns = `p.id, p.title, p.description, p.reporter, p.environment_id, p.mode, p.status, p.resolution_kind, p.created_at, p.updated_at`;
   const rows = query
     ? (db
         .prepare(
@@ -192,6 +196,7 @@ export function listProblems(opts: { q?: string; limit?: number } = {}): Problem
     environmentId: (row.environment_id as string | null) ?? null,
     mode: (row.mode as Mode) ?? 'fix',
     status: row.status as ProblemStatus,
+    resolutionKind: (row.resolution_kind as ResolutionKind | null) ?? null,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
   }));
@@ -220,6 +225,9 @@ export interface ProblemPatch {
   status?: ProblemStatus;
   summary?: string | null;
   resolution?: string | null;
+  resolutionKind?: ResolutionKind | null;
+  rootCause?: string | null;
+  highlights?: string[];
   researchStatus?: ResearchStatus;
   researchHeadline?: string | null;
   researchBrief?: string | null;
@@ -240,6 +248,9 @@ const PATCH_COLUMNS: Record<keyof ProblemPatch, [string, (v: never) => unknown]>
   status: ['status', (v) => v],
   summary: ['summary', (v) => v],
   resolution: ['resolution', (v) => v],
+  resolutionKind: ['resolution_kind', (v) => v],
+  rootCause: ['root_cause', (v) => v],
+  highlights: ['highlights', (v: string[]) => JSON.stringify(v)],
   researchStatus: ['research_status', (v) => v],
   researchHeadline: ['research_headline', (v) => v],
   researchBrief: ['research_brief', (v) => v],

@@ -5,7 +5,10 @@ export type ResearchStatus = 'idle' | 'running' | 'ready' | 'failed';
 export type Mode = 'fix' | 'howto' | 'plan' | 'options';
 
 /** What the user said happened when they report back on a step. */
-export type ReportKind = 'start' | 'worked' | 'failed' | 'error' | 'cant' | 'note';
+export type ReportKind = 'start' | 'worked' | 'failed' | 'error' | 'cant' | 'note' | 'clarify' | 'closed';
+
+/** How a chat was closed. "done" is for How-to, Plan and Options chats. */
+export type ResolutionKind = 'fixed' | 'fixed_unknown' | 'workaround' | 'unresolved' | 'done';
 
 export type Provider = 'gemini' | 'claude';
 
@@ -27,6 +30,8 @@ export interface Source {
 export interface RelatedMatch {
   id: string;
   score: number;
+  /** Why the AI judged it relevant; unjudged matches are never shown. */
+  reason?: string;
 }
 
 /** A client the admin contracts for, with its own stack description. */
@@ -55,6 +60,10 @@ export interface Problem {
   status: ProblemStatus;
   summary: string | null;
   resolution: string | null;
+  resolutionKind: ResolutionKind | null;
+  rootCause: string | null;
+  /** Short bullets of what was tried, learned or decided. */
+  highlights: string[];
   researchStatus: ResearchStatus;
   researchHeadline: string | null;
   researchBrief: string | null;
@@ -88,6 +97,7 @@ export interface ProblemListItem {
   environmentId: string | null;
   mode: Mode;
   status: ProblemStatus;
+  resolutionKind: ResolutionKind | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -102,8 +112,10 @@ export interface SimilarProblem {
   reporter: string | null;
   environmentName: string | null;
   status: ProblemStatus;
+  resolutionKind: ResolutionKind | null;
   createdAt: number;
   score: number;
+  reason: string | null;
 }
 
 export type CommandPlatform = 'windows' | 'mac' | 'other';

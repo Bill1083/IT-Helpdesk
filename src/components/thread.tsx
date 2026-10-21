@@ -1,18 +1,6 @@
 'use client';
 
-import {
-  Building2,
-  CheckCircle2,
-  ChevronDown,
-  History,
-  Loader2,
-  MoreHorizontal,
-  Pencil,
-  RotateCcw,
-  Sparkles,
-  Trash2,
-  User,
-} from 'lucide-react';
+import { Building2, CheckCircle2, ChevronDown, History, Loader2, MoreHorizontal, Pencil, RotateCcw, Sparkles, Trash2, User } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -21,12 +9,16 @@ import { toast } from 'sonner';
 import { Dropdown, type DropdownOption } from '@/components/dropdown';
 import { ErrorNotice } from '@/components/error-notice';
 import { MODE_ICONS } from '@/components/mode-icon';
+import { OUTCOME_STYLE } from '@/components/outcome';
 import { ReplyComposer, type ComposerSubmit, type ReplyComposerHandle } from '@/components/reply-composer';
 import { ResearchBar, ResearchDrawer } from '@/components/research';
+import { ResolutionSummary } from '@/components/resolution-summary';
 import type { EnvironmentOption } from '@/components/sidebar';
 import { AnswerBlock, ReportBubble, RequestCard, StepItem, StreamingAnswer } from '@/components/step';
-import { api, cn, longDate, notifyProblemsChanged, readNdjson, shortDate } from '@/lib/client';
+import { api, cn, longDate, notifyProblemsChanged, readNdjson } from '@/lib/client';
 import { MODES, modeLabel } from '@/lib/modes';
+import { outcomeLead, outcomeOf } from '@/lib/outcomes';
+import { groupSteps, isRevising } from '@/lib/steps';
 import type { Message, Problem, Provider, ResearchSnapshot, SimilarProblem, StreamEvent } from '@/lib/types';
 import type { ProblemView } from '@/lib/views';
 
@@ -54,18 +46,6 @@ function toResearch(problem: Problem): ResearchSnapshot {
   };
 }
 
-/** Each step with the reports that came back on it. */
-function groupSteps(messages: Message[]): { steps: { message: Message; reports: Message[] }[]; loose: Message[] } {
-  const steps: { message: Message; reports: Message[] }[] = [];
-  const loose: Message[] = [];
-  for (const m of messages) {
-    if (m.role === 'assistant') steps.push({ message: m, reports: [] });
-    else if (steps.length) steps[steps.length - 1].reports.push(m);
-    else loose.push(m);
-  }
-  return { steps, loose };
-}
-
 export function Thread({
   initial,
   ai,
@@ -84,27 +64,40 @@ export function Thread({
   const [messages, setMessages] = useState(initial.messages);
   const [similar, setSimilar] = useState(initial.similar);
   const [research, setResearch] = useState(() => toResearch(initial.problem));
-  const [streaming, setStreaming] = useState<{ text: string; status: string | null } | null>(null);
+  // A reply still being written on the server when the page loaded is shown live.
+  const [streaming, setStreaming] = useState<{ text: string; status: string | null } | null>(initial.live);
+  const [rejoining, setRejoining] = useState(Boolean(initial.live));
   const [error, setError] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
   const [drawer, setDrawer] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const composer = useRef<ReplyComposerHandle>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const started = useRef(false);
+  const localTurn = useRef(false);
   const id = problem.id;
 
+  const applyView = useCallback((view: ProblemView) => {
+    setProblem(view.problem);
+    setMessages(view.messages);
+    setSimilar(view.similar);
+    setResearch(toResearch(view.problem));
+  }, []);
+
+  /** Reload from the server; rejoins a reply that is still being written. */
   const refresh = useCallback(async () => {
     try {
       const view = await api<ProblemView>(`/api/problems/${id}`);
-      setProblem(view.problem);
-      setMessages(view.messages);
-      setSimilar(view.similar);
-      setResearch(toResearch(view.problem));
+      applyView(view);
+      if (view.live && !localTurn.current) {
+        setStreaming(view.live);
+        setRejoining(true);
+      }
     } catch {
       // keep what we have
     }
-  }, [id]);
+  }, [id, applyView]);
 
   const scrollToBottom = useCallback((force = false) => {
     const el = scroller.current;
@@ -115,6 +108,7 @@ export function Thread({
 
   const runTurn = useCallback(
     async (request: TurnRequest): Promise<boolean> => {
+      localTurn.current = true;
       setError(null);
       if (request.kind) {
         const optimistic: Message = {
@@ -187,8 +181,9 @@ export function Thread({
         failed = e instanceof Error ? e.message : 'Something went wrong.';
       }
       if (frame) cancelAnimationFrame(frame);
+      localTurn.current = false;
       await refresh();
-      setStreaming(null);
+      setStreaming((s) => (rejoiningRef.current ? s : null));
       if (failed) setError(failed);
       notifyProblemsChanged();
       requestAnimationFrame(() => scrollToBottom(true));
@@ -197,16 +192,60 @@ export function Thread({
     [id, refresh, scrollToBottom],
   );
 
-  // First reply for a problem that was just logged.
+  // Lets runTurn see whether a rejoin started while it was finishing.
+  const rejoiningRef = useRef(rejoining);
+  rejoiningRef.current = rejoining;
+
+  // First reply for a chat that was just logged; otherwise make sure the page
+  // isn't a stale copy (the browser can reuse an old render of this chat).
   useEffect(() => {
     if (started.current) return;
     started.current = true;
     if (autoStart) {
       router.replace(`/p/${id}`, { scroll: false });
       if (!initial.messages.some((m) => m.role === 'assistant')) void runTurn({});
+    } else if (!initial.live) {
+      void refresh();
     }
     requestAnimationFrame(() => bottom.current?.scrollIntoView({ block: 'end' }));
-  }, [autoStart, id, initial.messages, router, runTurn]);
+  }, [autoStart, id, initial.messages, initial.live, router, runTurn, refresh]);
+
+  // Coming back to the tab picks up anything that changed meanwhile.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && !localTurn.current) void refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [refresh]);
+
+  // Follow a reply that the server is still writing until it is saved.
+  useEffect(() => {
+    if (!rejoining) return;
+    let stopped = false;
+    const timer = setInterval(async () => {
+      try {
+        const view = await api<ProblemView>(`/api/problems/${id}`);
+        if (stopped) return;
+        if (view.live) {
+          setStreaming(view.live);
+          scrollToBottom();
+        } else {
+          applyView(view);
+          setStreaming(null);
+          setRejoining(false);
+          notifyProblemsChanged();
+          requestAnimationFrame(() => scrollToBottom(true));
+        }
+      } catch {
+        // try again next tick
+      }
+    }, 900);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [rejoining, id, applyView, scrollToBottom]);
 
   // Poll while background work is in flight (research, or the classifier's title).
   const waitingForTitle = !problem.title && messages.some((m) => m.role === 'assistant');
@@ -229,18 +268,21 @@ export function Thread({
   }, [research.status, waitingForTitle, id]);
 
   async function submitReport(value: ComposerSubmit): Promise<boolean> {
-    if (value.kind === 'worked') {
+    if (value.kind === 'worked' && value.outcome) {
       setResolving(true);
       try {
-        const view = await api<ProblemView>(`/api/problems/${id}/resolve`, { method: 'POST', json: { note: value.content } });
-        setProblem(view.problem);
-        setMessages(view.messages);
+        const view = await api<ProblemView>(`/api/problems/${id}/resolve`, {
+          method: 'POST',
+          json: { note: value.content, outcome: value.outcome },
+        });
+        applyView(view);
+        setShowAll(false);
         notifyProblemsChanged();
-        toast.success(problem.mode === 'fix' ? 'Marked resolved, saved for next time' : 'Marked done');
-        requestAnimationFrame(() => scrollToBottom(true));
+        toast.success(value.outcome === 'unresolved' ? 'Closed and saved for next time' : 'Resolved and saved for next time');
+        requestAnimationFrame(() => scroller.current?.scrollTo({ top: 0, behavior: 'smooth' }));
         return true;
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Could not mark it resolved.');
+        setError(e instanceof Error ? e.message : 'Could not close the chat.');
         return false;
       } finally {
         setResolving(false);
@@ -270,9 +312,12 @@ export function Thread({
   const fixing = problem.mode === 'fix';
   const start = messages.find((m) => m.kind === 'start');
   const rest = messages.filter((m) => m !== start);
+  const last = messages[messages.length - 1];
   const needsFirstStep = !streaming && !messages.some((m) => m.role === 'assistant');
-  const lastIsUser = messages[messages.length - 1]?.role === 'user';
-  const { steps, loose } = groupSteps(rest);
+  const lastIsUser = last?.role === 'user';
+  const { steps, loose } = groupSteps(messages);
+  // A question about the current step: its new version streams in place.
+  const revising = fixing && Boolean(streaming) && isRevising(messages);
   const actions = {
     problemId: id,
     claudeAvailable: ai.claude,
@@ -280,6 +325,7 @@ export function Thread({
     onThinkHarder: () => void runTurn({ regenerate: true, provider: 'claude' }),
     onRetry: () => void runTurn({ regenerate: true, provider: 'gemini' }),
   };
+  const showConversation = isOpen || showAll;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -302,45 +348,65 @@ export function Thread({
       <div ref={scroller} className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6 sm:py-8">
           {start && <RequestCard message={start} reporter={problem.reporter} />}
-          {similar.length > 0 && <SimilarCards items={similar} />}
-          <ResearchBar research={research} canStart={ai.gemini && !needsFirstStep} onOpen={() => setDrawer(true)} onDigDeeper={digDeeper} />
 
-          {loose.map((m) => (
-            <ReportBubble key={m.id} message={m} />
-          ))}
+          {!isOpen && (
+            <ResolutionSummary
+              problem={problem}
+              steps={steps}
+              showingAll={showAll}
+              onToggle={() => setShowAll((v) => !v)}
+              onReopen={reopen}
+            />
+          )}
 
-          {fixing ? (
-            (steps.length > 0 || streaming) && (
-              <ol className="pt-2">
-                {steps.map((s, index) => {
-                  const isLatest = index === steps.length - 1 && !streaming;
-                  return (
-                    <StepItem
-                      key={s.message.id}
-                      number={index + 1}
-                      message={s.message}
-                      reports={s.reports}
-                      isLatest={isLatest}
-                      isLast={index === steps.length - 1 && !streaming}
-                      canAct={isOpen && !busy && isLatest && s.reports.length === 0}
-                      {...actions}
-                    />
-                  );
-                })}
-                {streaming && <StreamingAnswer text={streaming.text} status={streaming.status} variant="step" number={steps.length + 1} />}
-              </ol>
-            )
-          ) : (
-            <div className="space-y-6 pt-1">
-              {rest.map((m, index) =>
-                m.role === 'user' ? (
-                  <ReportBubble key={m.id} message={m} />
-                ) : (
-                  <AnswerBlock key={m.id} message={m} canAct={isOpen && !busy && index === rest.length - 1} {...actions} />
-                ),
+          {showConversation && (
+            <>
+              {isOpen && similar.length > 0 && <SimilarCards items={similar} />}
+              {isOpen && (
+                <ResearchBar research={research} canStart={ai.gemini && !needsFirstStep} onOpen={() => setDrawer(true)} onDigDeeper={digDeeper} />
               )}
-              {streaming && <StreamingAnswer text={streaming.text} status={streaming.status} variant="chat" number={0} />}
-            </div>
+
+              {loose.map((m) => (
+                <ReportBubble key={m.id} message={m} />
+              ))}
+
+              {fixing ? (
+                (steps.length > 0 || streaming) && (
+                  <ol className="pt-2">
+                    {steps.map((s, index) => {
+                      const latest = index === steps.length - 1;
+                      const isLatest = latest && (!streaming || revising);
+                      return (
+                        <StepItem
+                          key={s.versions[0].id}
+                          number={index + 1}
+                          group={s}
+                          isLatest={isLatest}
+                          isLast={latest && (!streaming || revising)}
+                          streaming={latest && revising ? streaming : null}
+                          canAct={isOpen && !busy && isLatest && s.reports.length === 0 && last?.role === 'assistant'}
+                          {...actions}
+                        />
+                      );
+                    })}
+                    {streaming && !revising && (
+                      <StreamingAnswer text={streaming.text} status={streaming.status} variant="step" number={steps.length + 1} />
+                    )}
+                  </ol>
+                )
+              ) : (
+                <div className="space-y-6 pt-1">
+                  {rest.map((m, index) =>
+                    m.role === 'user' ? (
+                      <ReportBubble key={m.id} message={m} />
+                    ) : (
+                      <AnswerBlock key={m.id} message={m} canAct={isOpen && !busy && index === rest.length - 1} {...actions} />
+                    ),
+                  )}
+                  {streaming && <StreamingAnswer text={streaming.text} status={streaming.status} variant="chat" number={0} />}
+                </div>
+              )}
+            </>
           )}
 
           {error && (
@@ -359,30 +425,6 @@ export function Thread({
               <Sparkles className="size-4" /> Get an answer
             </button>
           )}
-
-          {!isOpen && (
-            <div className="animate-fade-up rounded-2xl bg-emerald-500/[0.07] p-4 ring-1 ring-inset ring-emerald-500/20 sm:p-5">
-              <div className="flex items-center justify-between gap-3">
-                <p className="flex items-center gap-2 font-semibold text-emerald-800 dark:text-emerald-300">
-                  <span className="flex size-7 items-center justify-center rounded-full bg-emerald-500 text-white">
-                    <CheckCircle2 className="size-4" />
-                  </span>
-                  {fixing ? 'Resolved' : 'Done'}
-                  {problem.resolvedAt && (
-                    <span className="text-sm font-normal text-emerald-700/70 dark:text-emerald-400/70" suppressHydrationWarning>
-                      {shortDate(problem.resolvedAt)}
-                    </span>
-                  )}
-                </p>
-                <button onClick={reopen} className="text-sm font-medium text-emerald-800 hover:underline dark:text-emerald-300">
-                  Reopen
-                </button>
-              </div>
-              {problem.resolution && (
-                <p className="mt-2.5 pl-9 text-[14.5px] leading-relaxed text-emerald-950 dark:text-emerald-100">{problem.resolution}</p>
-              )}
-            </div>
-          )}
           <div ref={bottom} />
         </div>
       </div>
@@ -394,7 +436,7 @@ export function Thread({
               GEMINI_API_KEY isn&apos;t set on the server yet, so the AI can&apos;t answer.
             </p>
           )}
-          <ReplyComposer ref={composer} mode={problem.mode} busy={busy} disabled={needsFirstStep} onSubmit={submitReport} />
+          <ReplyComposer ref={composer} mode={problem.mode} busy={busy} disabled={needsFirstStep && !streaming} onSubmit={submitReport} />
         </div>
       )}
 
@@ -406,39 +448,44 @@ export function Thread({
 function SimilarCards({ items }: { items: SimilarProblem[] }) {
   return (
     <div className="space-y-2">
-      {items.map((s) => (
-        <Link
-          key={s.id}
-          href={`/p/${s.id}`}
-          className="group flex animate-fade-up gap-3 rounded-xl bg-amber-500/[0.06] px-4 py-3 text-sm ring-1 ring-inset ring-amber-500/20 transition hover:bg-amber-500/[0.1]"
-        >
-          <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300">
-            <History className="size-4" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-700/80 dark:text-amber-300/80">
-              {s.score > 0 ? 'Seen before' : 'Possibly related'} · <span suppressHydrationWarning>{longDate(s.createdAt)}</span>
-              {s.environmentName ? ` · ${s.environmentName}` : ''}
-              {s.reporter ? ` · ${s.reporter}` : ''}
-            </p>
-            <p className="mt-0.5 text-zinc-800 dark:text-zinc-200">{s.summary || s.title || s.description}</p>
-            <p className="mt-1.5 flex items-start gap-1.5 text-zinc-600 dark:text-zinc-400">
-              {s.resolution ? (
-                <>
-                  <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                  <span>
-                    <span className="font-medium text-zinc-800 dark:text-zinc-200">Fixed by:</span> {s.resolution}
-                  </span>
-                </>
-              ) : s.status === 'open' ? (
-                'Still open.'
-              ) : (
-                'Resolved, no fix recorded.'
-              )}
-            </p>
-          </div>
-        </Link>
-      ))}
+      {items.map((s) => {
+        const kind = s.status === 'resolved' ? outcomeOf(s.resolutionKind, true) : null;
+        const OutcomeIcon = kind ? OUTCOME_STYLE[kind].icon : null;
+        return (
+          <Link
+            key={s.id}
+            href={`/p/${s.id}`}
+            className="group flex animate-fade-up gap-3 rounded-xl bg-amber-500/[0.06] px-4 py-3 text-sm ring-1 ring-inset ring-amber-500/20 transition hover:bg-amber-500/[0.1]"
+          >
+            <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300">
+              <History className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-700/80 dark:text-amber-300/80">
+                Seen before · <span suppressHydrationWarning>{longDate(s.createdAt)}</span>
+                {s.environmentName ? ` · ${s.environmentName}` : ''}
+                {s.reporter ? ` · ${s.reporter}` : ''}
+              </p>
+              <p className="mt-0.5 text-zinc-800 dark:text-zinc-200">{s.summary || s.title || s.description}</p>
+              {s.reason && <p className="mt-1 text-xs italic text-zinc-500">Why it matches: {s.reason}</p>}
+              <p className="mt-1.5 flex items-start gap-1.5 text-zinc-600 dark:text-zinc-400">
+                {kind && s.resolution ? (
+                  <>
+                    {OutcomeIcon && <OutcomeIcon className={cn('mt-0.5 size-3.5 shrink-0', OUTCOME_STYLE[kind].text)} />}
+                    <span>
+                      <span className="font-medium text-zinc-800 dark:text-zinc-200">{outcomeLead(kind)}</span> {s.resolution}
+                    </span>
+                  </>
+                ) : s.status === 'open' ? (
+                  'Still open.'
+                ) : (
+                  'Closed, no outcome recorded.'
+                )}
+              </p>
+            </div>
+          </Link>
+        );
+      })}
     </div>
   );
 }
@@ -504,8 +551,10 @@ function Header({
   }
 
   const title = problem.title || problem.description.split('\n')[0].slice(0, 90);
-  const envName = (id: string) => environments.find((e) => e.id === id)?.name ?? 'No environment';
+  const envName = (envId: string) => environments.find((e) => e.id === envId)?.name ?? 'No environment';
   const done = problem.status !== 'open';
+  const doneKind = outcomeOf(problem.resolutionKind, problem.mode === 'fix');
+  const DoneIcon = OUTCOME_STYLE[doneKind].icon;
 
   return (
     <header className="z-20 flex items-start gap-3 border-b border-zinc-200/70 bg-white/85 px-4 py-3 pl-14 backdrop-blur-md md:px-6 dark:border-zinc-800/70 dark:bg-zinc-950/85">
@@ -597,8 +646,8 @@ function Header({
             <CheckCircle2 className="size-4 text-emerald-600" /> {problem.mode === 'fix' ? 'Mark resolved' : 'Mark done'}
           </button>
         ) : (
-          <span className="hidden items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-500/20 sm:flex dark:text-emerald-300">
-            <CheckCircle2 className="size-3.5" /> {problem.mode === 'fix' ? 'Resolved' : 'Done'}
+          <span className={cn('hidden items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset sm:flex', OUTCOME_STYLE[doneKind].badge)}>
+            <DoneIcon className="size-3.5" /> Closed
           </span>
         )}
         <div className="relative">

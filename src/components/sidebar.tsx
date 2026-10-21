@@ -2,8 +2,8 @@
 
 import {
   Building2,
-  CheckCircle2,
   ChevronDown,
+  LayoutList,
   LogOut,
   Monitor,
   Moon,
@@ -23,8 +23,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Dropdown } from '@/components/dropdown';
 import { Logo } from '@/components/logo';
 import { MODE_ICONS } from '@/components/mode-icon';
+import { OUTCOME_STYLE } from '@/components/outcome';
 import { PROBLEMS_CHANGED, api, cn, shortDate } from '@/lib/client';
-import type { ProblemListItem } from '@/lib/types';
+import { MODES } from '@/lib/modes';
+import { outcomeOf } from '@/lib/outcomes';
+import type { Mode, ProblemListItem } from '@/lib/types';
 
 export interface EnvironmentOption {
   id: string;
@@ -33,6 +36,7 @@ export interface EnvironmentOption {
 
 const RESOLVED_SHOWN = 40;
 const FILTER_KEY = 'ithd.environmentFilter';
+const TYPE_KEY = 'ithd.typeFilter';
 
 export function Sidebar({
   initialProblems,
@@ -47,6 +51,7 @@ export function Sidebar({
   const [problems, setProblems] = useState(initialProblems);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState<Mode | 'all'>('all');
   const pathname = usePathname();
   const router = useRouter();
 
@@ -55,6 +60,8 @@ export function Sidebar({
     try {
       const saved = localStorage.getItem(FILTER_KEY);
       if (saved) setFilter(saved);
+      const savedType = localStorage.getItem(TYPE_KEY) as Mode | 'all' | null;
+      if (savedType && (savedType === 'all' || MODES.some((m) => m.key === savedType))) setTypeFilter(savedType);
     } catch {
       // storage unavailable: keep "all"
     }
@@ -64,6 +71,15 @@ export function Sidebar({
     setFilter(value);
     try {
       localStorage.setItem(FILTER_KEY, value);
+    } catch {
+      // ignore
+    }
+  }
+
+  function changeType(value: Mode | 'all') {
+    setTypeFilter(value);
+    try {
+      localStorage.setItem(TYPE_KEY, value);
     } catch {
       // ignore
     }
@@ -94,14 +110,16 @@ export function Sidebar({
   const activeFilter = filter === 'all' || filter === 'none' || envNames.has(filter) ? filter : 'all';
 
   const { open, resolved } = useMemo(() => {
-    const visible = problems.filter((p) =>
-      activeFilter === 'all' ? true : activeFilter === 'none' ? !p.environmentId : p.environmentId === activeFilter,
+    const visible = problems.filter(
+      (p) =>
+        (activeFilter === 'all' ? true : activeFilter === 'none' ? !p.environmentId : p.environmentId === activeFilter) &&
+        (typeFilter === 'all' || p.mode === typeFilter),
     );
     return {
       open: visible.filter((p) => p.status === 'open'),
       resolved: visible.filter((p) => p.status === 'resolved').slice(0, RESOLVED_SHOWN),
     };
-  }, [problems, activeFilter]);
+  }, [problems, activeFilter, typeFilter]);
 
   async function signOut() {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -160,6 +178,7 @@ export function Sidebar({
             )}
           />
         )}
+        <TypeFilter value={typeFilter} onChange={changeType} />
         <div className="relative pt-1.5">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 mt-[3px] size-4 -translate-y-1/2 text-zinc-400" />
           <input
@@ -189,7 +208,7 @@ export function Sidebar({
       <nav className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         {open.length + resolved.length === 0 && (
           <p className="px-3 py-8 text-center text-sm text-zinc-500">
-            {query ? 'No matches.' : activeFilter === 'all' ? 'Nothing yet. Start a new chat.' : 'Nothing in this environment yet.'}
+            {query ? 'No matches.' : activeFilter === 'all' && typeFilter === 'all' ? 'Nothing yet. Start a new chat.' : 'Nothing matches these filters.'}
           </p>
         )}
         <Section title="Open" items={open} pathname={pathname} envNames={showEnvName ? envNames : null} />
@@ -261,7 +280,8 @@ function Section({
         {items.map((p) => {
           const active = pathname === `/p/${p.id}`;
           const done = p.status === 'resolved';
-          const Icon = done ? CheckCircle2 : MODE_ICONS[p.mode];
+          const outcome = done ? OUTCOME_STYLE[outcomeOf(p.resolutionKind, p.mode === 'fix')] : null;
+          const Icon = outcome ? outcome.icon : MODE_ICONS[p.mode];
           const env = envNames && p.environmentId ? envNames.get(p.environmentId) : null;
           return (
             <li key={p.id}>
@@ -277,7 +297,7 @@ function Section({
                 <Icon
                   className={cn(
                     'mt-0.5 size-4 shrink-0',
-                    done ? 'text-emerald-500' : active ? 'text-accent' : 'text-zinc-400 group-hover:text-zinc-500',
+                    outcome ? outcome.text : active ? 'text-accent' : 'text-zinc-400 group-hover:text-zinc-500',
                   )}
                 />
                 <div className="min-w-0 flex-1">
@@ -319,5 +339,38 @@ function ThemeButton() {
     >
       <Icon className="size-4" />
     </button>
+  );
+}
+
+/** All / Fix / How-to / Plan / Options. The active one shows its name. */
+function TypeFilter({ value, onChange }: { value: Mode | 'all'; onChange: (value: Mode | 'all') => void }) {
+  const options: { key: Mode | 'all'; label: string; icon: typeof LayoutList }[] = [
+    { key: 'all', label: 'All', icon: LayoutList },
+    ...MODES.map((m) => ({ key: m.key, label: m.label, icon: MODE_ICONS[m.key] })),
+  ];
+  return (
+    <div role="group" aria-label="Filter by type" className="flex gap-0.5 rounded-lg bg-zinc-200/50 p-0.5 dark:bg-zinc-800/60">
+      {options.map(({ key, label, icon: Icon }) => {
+        const active = value === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={active}
+            title={label}
+            onClick={() => onChange(key)}
+            className={cn(
+              'flex h-7 items-center justify-center gap-1.5 rounded-md text-xs font-medium transition',
+              active
+                ? 'flex-[2] bg-white px-2 text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-zinc-50'
+                : 'flex-1 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100',
+            )}
+          >
+            <Icon className={cn('size-3.5 shrink-0', active && key !== 'all' && 'text-accent')} />
+            {active && <span className="truncate">{label}</span>}
+          </button>
+        );
+      })}
+    </div>
   );
 }

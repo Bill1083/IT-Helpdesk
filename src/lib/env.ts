@@ -71,8 +71,9 @@ export const env = {
     return readNumber('BACKUP_KEEP_DAYS', 30);
   },
 
+  /** How alike a past problem must be to be considered at all; the AI then judges relevance. */
   get similarityThreshold(): number {
-    const value = readNumber('SIMILARITY_THRESHOLD', 0.72);
-    return value < 1 ? value : 0.72;
+    const value = readNumber('SIMILARITY_THRESHOLD', 0.6);
+    return value < 1 ? value : 0.6;
   },
 };

@@ -14,5 +14,5 @@ export async function POST(request: NextRequest) {
   const body = await readBody(request, schema);
   if ('response' in body) return body.response;
   const matches = keywordMatches(body.data.text, 3).map((m) => ({ id: m.id, score: 0 }));
-  return NextResponse.json({ items: similarFromMatches(matches) });
+  return NextResponse.json({ items: similarFromMatches(matches, { requireReason: false }) });
 }

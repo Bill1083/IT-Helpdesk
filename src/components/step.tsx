@@ -8,7 +8,9 @@ import {
   ChevronDown,
   Copy,
   ExternalLink,
+  History,
   Loader2,
+  MessageCircleQuestion,
   MessageSquareShare,
   RotateCcw,
   User,
@@ -21,6 +23,7 @@ import { AttachmentList } from '@/components/attachments';
 import { Logo } from '@/components/logo';
 import { Markdown } from '@/components/markdown';
 import { REPORT_LABELS, api, cn, longDate, stepTitle } from '@/lib/client';
+import type { StepGroup } from '@/lib/steps';
 import type { Message, Source } from '@/lib/types';
 
 /* ------------------------------------------------------------- outcomes */
@@ -49,6 +52,7 @@ const CHIP: Record<string, string> = {
   failed: 'bg-red-500/10 text-red-700 ring-red-500/20 dark:text-red-300',
   error: 'bg-amber-500/10 text-amber-800 ring-amber-500/25 dark:text-amber-300',
   cant: 'bg-zinc-500/10 text-zinc-700 ring-zinc-500/20 dark:text-zinc-300',
+  closed: 'bg-zinc-500/10 text-zinc-700 ring-zinc-500/20 dark:text-zinc-300',
 };
 
 function Marker({ outcome, number }: { outcome: Outcome; number: number }) {
@@ -270,18 +274,95 @@ function bodyWithoutHeading(content: string): string {
   return content.replace(/^#{2,4}\s*.+$/m, '').trim();
 }
 
+/** The admin's questions about a step, shown above the revised step. */
+function Clarifications({ items }: { items: Message[] }) {
+  return (
+    <div className="mb-3 space-y-1.5">
+      {items.map((m) => (
+        <div key={m.id} className="flex items-start gap-2 rounded-xl bg-zinc-50 px-3 py-2 text-sm dark:bg-zinc-800/60">
+          <MessageCircleQuestion className="mt-0.5 size-4 shrink-0 text-accent" />
+          <div className="min-w-0">
+            <p className="whitespace-pre-wrap break-words text-zinc-700 dark:text-zinc-300">{m.content}</p>
+            {m.attachments.length > 0 && (
+              <div className="mt-1.5">
+                <AttachmentList attachments={m.attachments} />
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Earlier versions of a step that a question changed, folded away. */
+function EarlierVersions({ versions }: { versions: Message[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-3 border-t border-zinc-100 pt-2 dark:border-zinc-800">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+      >
+        <History className="size-3.5" />
+        {open ? 'Hide' : 'Show'} {versions.length === 1 ? 'the original step' : `${versions.length} earlier versions`}
+        <ChevronDown className={cn('size-3.5 transition', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="mt-2 space-y-3 opacity-80">
+          {versions.map((v) => (
+            <div key={v.id} className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-950/50">
+              <Markdown text={bodyWithoutHeading(v.content)} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StreamingBody({ text, status, step }: { text: string; status: string | null; step: boolean }) {
+  return text ? (
+    <div>
+      <Markdown text={step ? bodyWithoutHeading(text) : text} />
+      <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-accent/70 align-middle" />
+    </div>
+  ) : (
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-2 text-sm text-zinc-500">
+        <Loader2 className="size-4 animate-spin text-accent" />
+        <span>{status ?? 'Working it out…'}</span>
+      </div>
+      <div className="skeleton h-3 w-11/12" />
+      <div className="skeleton h-3 w-9/12" />
+      <div className="skeleton h-3 w-10/12" />
+    </div>
+  );
+}
+
 /** One row of the Fix stepper: marker, title, outcome, and the step itself. */
 export function StepItem({
   number,
-  message,
-  reports,
+  group,
   isLatest,
   isLast,
+  streaming,
   ...actions
-}: ActionProps & { number: number; reports: Message[]; isLatest: boolean; isLast: boolean }) {
+}: Omit<ActionProps, 'message'> & {
+  number: number;
+  group: StepGroup;
+  isLatest: boolean;
+  isLast: boolean;
+  /** A revision of this step that is being written right now. */
+  streaming?: { text: string; status: string | null } | null;
+}) {
   const [expanded, setExpanded] = useState(isLatest);
-  const outcome = outcomeOf(reports, isLatest);
-  const title = cleanTitle(message.content, `Step ${number}`);
+  const message = group.versions[group.versions.length - 1];
+  const { reports, clarifications } = group;
+  const outcome = streaming ? 'pending' : outcomeOf(reports, isLatest);
+  const titleSource = streaming && stepTitle(streaming.text) ? streaming.text : message.content;
+  const title = cleanTitle(titleSource, `Step ${number}`);
   const open = expanded || isLatest;
 
   // Fold a step away once a newer one arrives.
@@ -304,6 +385,9 @@ export function StepItem({
           <span className={cn('min-w-0 flex-1 truncate font-medium', isLatest ? 'text-zinc-900 dark:text-zinc-50' : 'text-zinc-600 group-hover:text-zinc-900 dark:text-zinc-400 dark:group-hover:text-zinc-100')}>
             {title}
           </span>
+          {group.versions.length > 1 && (
+            <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-semibold text-accent">Updated</span>
+          )}
           {!isLatest && <ChevronDown className={cn('size-4 shrink-0 text-zinc-400 transition', open && 'rotate-180')} />}
         </button>
 
@@ -314,8 +398,16 @@ export function StepItem({
               isLatest && 'rounded-2xl bg-white p-4 shadow-soft ring-1 ring-zinc-200/90 sm:p-5 dark:bg-zinc-900 dark:ring-zinc-800',
             )}
           >
-            <Markdown text={bodyWithoutHeading(message.content)} />
-            <StepActions message={message} {...actions} />
+            {clarifications.length > 0 && <Clarifications items={clarifications} />}
+            {streaming ? (
+              <StreamingBody text={streaming.text} status={streaming.status} step />
+            ) : (
+              <>
+                <Markdown text={bodyWithoutHeading(message.content)} />
+                <StepActions message={message} {...actions} />
+              </>
+            )}
+            {group.versions.length > 1 && !streaming && <EarlierVersions versions={group.versions.slice(0, -1)} />}
           </div>
         )}
 
@@ -344,30 +436,15 @@ export function AnswerBlock({ message, ...actions }: ActionProps) {
   );
 }
 
-/** The reply that is being written right now. */
+/** A new reply that is being written right now. */
 export function StreamingAnswer({ text, status, variant, number }: { text: string; status: string | null; variant: 'step' | 'chat'; number: number }) {
-  const body = text ? (
-    <div>
-      <Markdown text={variant === 'step' ? bodyWithoutHeading(text) : text} />
-      <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-accent/70 align-middle" />
-    </div>
-  ) : (
-    <div className="space-y-2.5">
-      <div className="flex items-center gap-2 text-sm text-zinc-500">
-        <Loader2 className="size-4 animate-spin text-accent" />
-        <span>{status ?? 'Working it out…'}</span>
-      </div>
-      <div className="skeleton h-3 w-11/12" />
-      <div className="skeleton h-3 w-9/12" />
-      <div className="skeleton h-3 w-10/12" />
-    </div>
-  );
-
   if (variant === 'chat') {
     return (
       <div className="flex gap-3">
         <Logo size="sm" className="mt-0.5" />
-        <div className="min-w-0 flex-1">{body}</div>
+        <div className="min-w-0 flex-1">
+          <StreamingBody text={text} status={status} step={false} />
+        </div>
       </div>
     );
   }
@@ -378,11 +455,11 @@ export function StreamingAnswer({ text, status, variant, number }: { text: strin
       <div className="min-w-0 flex-1">
         <div className="flex min-h-8 items-center gap-2">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Step {number}</span>
-          <span className="truncate font-medium text-zinc-900 dark:text-zinc-50">
-            {live ? cleanTitle(text, '') : 'Working on it…'}
-          </span>
+          <span className="truncate font-medium text-zinc-900 dark:text-zinc-50">{live ? cleanTitle(text, '') : 'Working on it…'}</span>
         </div>
-        <div className="mt-2 rounded-2xl bg-white p-4 shadow-soft ring-1 ring-zinc-200/90 sm:p-5 dark:bg-zinc-900 dark:ring-zinc-800">{body}</div>
+        <div className="mt-2 rounded-2xl bg-white p-4 shadow-soft ring-1 ring-zinc-200/90 sm:p-5 dark:bg-zinc-900 dark:ring-zinc-800">
+          <StreamingBody text={text} status={status} step />
+        </div>
       </div>
     </li>
   );

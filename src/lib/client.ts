@@ -62,6 +62,7 @@ export const REPORT_LABELS: Record<string, string> = {
   failed: "Didn't work",
   error: 'Different error',
   cant: "Couldn't do this step",
+  closed: 'Closed',
 };
 
 export function shortDate(ms: number): string {

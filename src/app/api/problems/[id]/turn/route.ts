@@ -9,7 +9,7 @@ import { attachmentsSchema } from '@/lib/schemas';
 export const dynamic = 'force-dynamic';
 
 const schema = z.object({
-  kind: z.enum(['worked', 'failed', 'error', 'cant', 'note']).optional(),
+  kind: z.enum(['worked', 'failed', 'error', 'cant', 'note', 'clarify']).optional(),
   content: z.string().max(20_000).default(''),
   attachments: attachmentsSchema,
   regenerate: z.boolean().default(false),
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const body = await readBody(request, schema);
   if ('response' in body) return body.response;
   const { kind, content, attachments, regenerate, provider, search } = body.data;
-  if (kind === 'note' && !content.trim() && attachments.length === 0) {
+  if ((kind === 'note' || kind === 'clarify') && !content.trim() && attachments.length === 0) {
     return jsonError('Write what happened first.');
   }
 

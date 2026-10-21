@@ -11,11 +11,13 @@ import { PLAYBOOKS, playbooksFor, routePlaybooks } from '@/lib/playbooks';
 import {
   CLASSIFY_SCHEMA,
   DEFAULT_ABOUT,
+  RELEVANCE_SCHEMA,
   RESOLUTION_SCHEMA,
   SYNTHESIS_SCHEMA,
   buildSystemPrompt,
   classifyPrompt,
   problemBlock,
+  relevancePrompt,
   reportText,
   researchAngles,
   researchPrompt,
@@ -25,11 +27,13 @@ import {
   userMessagePrompt,
 } from '@/lib/prompts';
 import * as repo from '@/lib/repo';
+import { groupSteps, isRevising } from '@/lib/steps';
 import type {
   Attachment,
   Message,
   Mode,
   Problem,
+  ResolutionKind,
   Provider,
   RelatedMatch,
   ReportKind,
@@ -211,11 +215,16 @@ function cosine(a: Float32Array, b: Float32Array): number {
   return na && nb ? dot / Math.sqrt(na * nb) : 0;
 }
 
-export function similarFromMatches(matches: RelatedMatch[]): SimilarProblem[] {
-  if (matches.length === 0) return [];
-  const byId = new Map(repo.getProblems(matches.map((m) => m.id)).map((p) => [p.id, p]));
+/**
+ * "Seen before" only shows matches the AI judged relevant (they carry a reason).
+ * Live keyword suggestions while typing pass requireReason: false.
+ */
+export function similarFromMatches(matches: RelatedMatch[], { requireReason = true } = {}): SimilarProblem[] {
+  const judged = requireReason ? matches.filter((m) => m.reason) : matches;
+  if (judged.length === 0) return [];
+  const byId = new Map(repo.getProblems(judged.map((m) => m.id)).map((p) => [p.id, p]));
   const envNames = new Map(repo.listEnvironments().map((e) => [e.id, e.name]));
-  return matches.flatMap((m) => {
+  return judged.flatMap((m) => {
     const p = byId.get(m.id);
     if (!p) return [];
     return [
@@ -228,34 +237,74 @@ export function similarFromMatches(matches: RelatedMatch[]): SimilarProblem[] {
         reporter: p.reporter,
         environmentName: p.environmentId ? (envNames.get(p.environmentId) ?? null) : null,
         status: p.status,
+        resolutionKind: p.resolutionKind,
         createdAt: p.createdAt,
         score: m.score,
+        reason: m.reason ?? null,
       },
     ];
   });
 }
 
 /**
- * Embed the new problem and compare it with every past one. A few thousand
- * 768-float vectors compare in well under a millisecond, so no vector DB.
- * Without a Gemini key (or if embedding fails) it falls back to keyword search.
+ * One cheap call (the fast model, minimal thinking) checks every candidate at
+ * once and keeps only the ones that would genuinely help, with a reason.
+ */
+async function judgeRelevance(problem: Problem, candidates: { match: RelatedMatch; past: Problem }[]): Promise<RelatedMatch[]> {
+  const out = await geminiJson<{ matches?: { index: number; relevant: boolean; reason?: string }[] }>({
+    model: env.geminiFastModel,
+    prompt: relevancePrompt(
+      problem.description,
+      candidates.map(({ past }, index) => ({
+        index,
+        text: [
+          past.title ?? past.description.slice(0, 120),
+          past.summary ?? past.description.slice(0, 400),
+          past.resolution ? `Outcome: ${past.resolution}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      })),
+    ),
+    schema: RELEVANCE_SCHEMA,
+    thinking: ThinkingLevel.MINIMAL,
+    timeoutMs: 6_000,
+  });
+  return (out.matches ?? [])
+    .filter((m) => m.relevant && candidates[m.index] && clean(m.reason, 160))
+    .map((m) => ({ ...candidates[m.index].match, reason: clean(m.reason, 160)! }))
+    .slice(0, 2);
+}
+
+/**
+ * Embed the new problem and compare it with every past one (a few thousand
+ * vectors compare in well under a millisecond, so no vector DB), then let the
+ * AI judge the closest few. Nothing is shown unless it is judged relevant.
  */
 export async function findSimilar(problem: Problem): Promise<SimilarProblem[]> {
-  let matches: RelatedMatch[];
+  let matches: RelatedMatch[] = [];
   try {
-    if (!env.geminiApiKey) throw new Error('no key');
-    const vector = await geminiEmbed(problem.description);
-    repo.setEmbedding(problem.id, vector);
-    matches = repo
-      .allEmbeddings(problem.id)
-      .filter((e) => e.vector.length === vector.length)
-      .map((e) => ({ id: e.id, score: Math.round(cosine(vector, e.vector) * 1000) / 1000 }))
-      .filter((m) => m.score >= env.similarityThreshold)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
+    if (env.geminiApiKey) {
+      const vector = await geminiEmbed(problem.description);
+      repo.setEmbedding(problem.id, vector);
+      const nearest = repo
+        .allEmbeddings(problem.id)
+        .filter((e) => e.vector.length === vector.length)
+        .map((e) => ({ id: e.id, score: Math.round(cosine(vector, e.vector) * 1000) / 1000 }))
+        .filter((m) => m.score >= env.similarityThreshold)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5);
+      const byId = new Map(repo.getProblems(nearest.map((m) => m.id)).map((p) => [p.id, p]));
+      const candidates = nearest.flatMap((match) => {
+        const past = byId.get(match.id);
+        return past ? [{ match, past }] : [];
+      });
+      if (candidates.length) matches = await judgeRelevance(problem, candidates);
+    }
   } catch (error) {
-    if (env.geminiApiKey) console.error('[it-desk] embedding failed, using keyword match:', describeError(error));
-    matches = repo.keywordMatches(problem.description, 2, problem.id).map((m) => ({ id: m.id, score: 0 }));
+    // Better no banner than an irrelevant one.
+    console.error('[it-desk] past-problem matching failed:', describeError(error));
+    matches = [];
   }
   repo.updateProblem(problem.id, { related: matches }, false);
   return similarFromMatches(matches);
@@ -303,7 +352,7 @@ function researchContext(problem: Problem, messages: Message[]): string {
   let lastStep: string | null = null;
   for (const m of messages) {
     if (m.role === 'assistant') lastStep = stepTitle(m.content) ?? m.content.slice(0, 120);
-    else if (m.kind !== 'start' && lastStep) {
+    else if (m.kind !== 'start' && m.kind !== 'clarify' && lastStep) {
       tried.push(`- ${lastStep} -> ${reportText(m.kind, m.content).replace(/\n+/g, ' ').slice(0, 300)}`);
       lastStep = null;
     }
@@ -404,7 +453,38 @@ export interface TurnOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Replies being written right now. Leaving a chat doesn't stop the reply (the
+ * server finishes and saves it), so a reopened chat reads this to rejoin it live.
+ */
+const liveTurns = new Map<string, { text: string; status: string | null; startedAt: number }>();
+const LIVE_STALE_MS = 5 * 60 * 1000;
+
+export function liveTurn(problemId: string): { text: string; status: string | null } | null {
+  const live = liveTurns.get(problemId);
+  return live && Date.now() - live.startedAt < LIVE_STALE_MS ? { text: live.text, status: live.status } : null;
+}
+
 export async function* streamTurn(problemId: string, opts: TurnOptions): AsyncGenerator<StreamEvent> {
+  // One reply at a time per chat, so two tabs can't create duplicate steps.
+  if (liveTurn(problemId)) {
+    yield { type: 'error', message: 'Still writing the previous reply. It will appear here in a moment.' };
+    return;
+  }
+  const live = { text: '', status: 'Starting…' as string | null, startedAt: Date.now() };
+  liveTurns.set(problemId, live);
+  try {
+    for await (const event of turnEvents(problemId, opts)) {
+      if (event.type === 'status') live.status = event.text;
+      else if (event.type === 'delta') live.text += event.text;
+      yield event;
+    }
+  } finally {
+    if (liveTurns.get(problemId) === live) liveTurns.delete(problemId);
+  }
+}
+
+async function* turnEvents(problemId: string, opts: TurnOptions): AsyncGenerator<StreamEvent> {
   let problem = repo.getProblem(problemId);
   if (!problem) {
     yield { type: 'error', message: 'Problem not found.' };
@@ -439,7 +519,7 @@ export async function* streamTurn(problemId: string, opts: TurnOptions): AsyncGe
   if (isFirst && !opts.regenerate) {
     yield { type: 'status', text: 'Checking your past problems…' };
     // Matching first: a past fix is the fastest step there is.
-    similar = await withTimeout(findSimilar(problem), 3000, []);
+    similar = await withTimeout(findSimilar(problem), 5000, []);
     if (similar.length) yield { type: 'similar', items: similar };
     classifying = classify(problem);
     // A quick how-to is answered with live search; background research is for
@@ -451,7 +531,7 @@ export async function* streamTurn(problemId: string, opts: TurnOptions): AsyncGe
 
   // Two misses in a row: re-research with everything tried so far.
   if (!isFirst && opts.report && FAIL_KINDS.has(opts.report.kind)) {
-    const reports = messages.filter((m) => m.role === 'user' && m.kind !== 'start').slice(-2);
+    const reports = messages.filter((m) => m.role === 'user' && m.kind !== 'start' && m.kind !== 'clarify').slice(-2);
     if (reports.length === 2 && reports.every((m) => FAIL_KINDS.has(m.kind)) && startResearch(problemId)) {
       yield { type: 'research', status: 'running' };
     }
@@ -459,12 +539,16 @@ export async function* streamTurn(problemId: string, opts: TurnOptions): AsyncGe
 
   problem = repo.getProblem(problemId)!;
   const environment = repo.getEnvironment(problem.environmentId);
-  const stepNumber = messages.filter((m) => m.role === 'assistant').length + 1;
+  // A question about the current step revises it; anything else moves on.
+  const revising = problem.mode === 'fix' && isRevising(messages);
+  const stepCount = groupSteps(messages).steps.length;
+  const stepNumber = revising ? stepCount : stepCount + 1;
   const ready = problem.researchStatus === 'ready';
   const context = turnContext({
     mode: problem.mode,
     modeLocked: problem.modeLocked,
     stepNumber,
+    revising,
     researchBrief: ready ? problem.researchBrief : null,
     researching: problem.researchStatus === 'running',
   });
@@ -547,30 +631,43 @@ export async function* streamTurn(problemId: string, opts: TurnOptions): AsyncGe
 
 /* ------------------------------------------------------------- resolution */
 
-export async function resolveProblem(problemId: string, note: string): Promise<Problem | null> {
+export async function resolveProblem(problemId: string, note: string, outcome: ResolutionKind): Promise<Problem | null> {
   const problem = repo.getProblem(problemId);
   if (!problem) return null;
-  repo.addMessage({ problemId, role: 'user', kind: 'worked', content: note.trim() });
+  // "Fixed" means the last step worked, so it marks that step green.
+  repo.addMessage({ problemId, role: 'user', kind: outcome === 'fixed' ? 'worked' : 'closed', content: note.trim() });
   const messages = repo.getMessages(problemId);
 
   let resolution = clean(note, 1000);
+  let rootCause: string | null = null;
   let summary = problem.summary;
+  let highlights: string[] = [];
   if (env.geminiApiKey) {
     try {
-      const out = await geminiJson<{ resolution?: string; summary?: string }>({
+      const out = await geminiJson<{ resolution?: string; root_cause?: string; summary?: string; highlights?: string[] }>({
         model: env.geminiFastModel,
-        prompt: resolutionPrompt(transcript(problem, messages), note),
+        prompt: resolutionPrompt(transcript(problem, messages), note, outcome),
         schema: RESOLUTION_SCHEMA,
         thinking: ThinkingLevel.LOW,
         timeoutMs: 20_000,
       });
       resolution = clean(out.resolution, 1000) ?? resolution;
+      rootCause = outcome === 'unresolved' || outcome === 'done' ? null : clean(out.root_cause, 400);
       summary = clean(out.summary, 400) ?? summary;
+      highlights = (out.highlights ?? []).map((h) => clean(h, 200)).filter((h): h is string => Boolean(h)).slice(0, 5);
     } catch (error) {
       console.error('[it-desk] resolution summary failed:', describeError(error));
     }
   }
-  return repo.updateProblem(problemId, { status: 'resolved', resolvedAt: Date.now(), resolution, summary });
+  return repo.updateProblem(problemId, {
+    status: 'resolved',
+    resolvedAt: Date.now(),
+    resolution,
+    resolutionKind: outcome,
+    rootCause,
+    summary,
+    highlights,
+  });
 }
 
 /** A friendly Slack-ready version of one step for the employee. */
