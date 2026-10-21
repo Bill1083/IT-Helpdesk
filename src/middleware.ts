@@ -9,7 +9,8 @@ import {
 } from '@/lib/auth';
 import { env } from '@/lib/env';
 
-const PUBLIC_PATHS = new Set(['/login', '/api/auth/login', '/api/health', '/icon.svg']);
+// The install files are fetched without cookies, so they must be public too.
+const PUBLIC_PATHS = new Set(['/login', '/api/auth/login', '/api/health', '/icon.svg', '/manifest.webmanifest', '/sw.js']);
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 function isHttps(request: NextRequest): boolean {
@@ -24,7 +25,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Cross-site requests are not accepted.' }, { status: 403 });
   }
 
-  if (PUBLIC_PATHS.has(pathname)) return NextResponse.next();
+  if (PUBLIC_PATHS.has(pathname) || pathname.startsWith('/icons/')) return NextResponse.next();
 
   const session = await verifySessionToken(env.sessionSecret, request.cookies.get(SESSION_COOKIE)?.value);
   if (session) {

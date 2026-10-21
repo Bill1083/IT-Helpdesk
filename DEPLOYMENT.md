@@ -78,15 +78,83 @@ sudo nginx -t && sudo systemctl reload nginx
 The streaming location in `nginx.conf` turns off proxy buffering for the step
 endpoint. Without it, steps arrive all at once instead of word by word.
 
+## 5. Install the desktop app (Windows)
+
+IT Desk installs as an app from Edge or Chrome. It opens in its own window but still reads everything from the
+server, so your history is the same on every device.
+
+1. Open `https://it.wharveytech.com` in **Edge**, sign in, and tick **Remember me**.
+2. Go to **Settings → Desktop app → Install IT Desk**. Or use Edge's ⋯ menu → **Apps** → **Install this site as an
+   app**; in Chrome, use the install icon at the right of the address bar.
+3. Right-click the new taskbar icon and choose **Pin to taskbar**. Right-clicking it also gives New chat, Useful
+   commands and Settings shortcuts.
+4. Optional: open `edge://apps`, right-click IT Desk, and turn on **Start app when you sign in**.
+
+Updates arrive by themselves whenever you redeploy; there is nothing to reinstall.
+
+## 6. Backups to Cloudflare R2
+
+Once a day the app snapshots the database, uploads it to R2, copies any new screenshots, and deletes snapshots older
+than 30 days (`BACKUP_KEEP_DAYS`). No cron job is needed; the app runs it itself.
+
+**In the Cloudflare dashboard:**
+
+1. **R2 Object Storage → Create bucket.** Name it e.g. `it-desk-backups`. Leave Location on **Automatic**, and
+   don't pick a jurisdiction: an EU jurisdiction uses a different endpoint.
+2. **R2 Object Storage → Manage API tokens → Create API token.**
+   - Permissions: **Object Read & Write**
+   - Specify bucket: **Apply to specific buckets only** → `it-desk-backups`
+   - TTL: **Forever**. Optionally limit Client IP to your VPS's IP.
+3. Copy the **Access Key ID** and **Secret Access Key** (the secret is shown only once). Your **Account ID** is on
+   the R2 overview page, and is also the first part of the S3 endpoint `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
+
+**On the VPS**, add them to `.env`:
+
+```dotenv
+R2_ACCOUNT_ID=your-account-id
+R2_ACCESS_KEY_ID=your-access-key-id
+R2_SECRET_ACCESS_KEY=your-secret-access-key
+R2_BUCKET=it-desk-backups
+```
+
+```bash
+cd /home/deploy/it-helpdesk && docker compose up -d
+```
+
+Then open **Settings → Backups → Back up now**. The bucket should show `db/helpdesk-<date>.db.gz` and an `uploads/`
+folder. Settings shows the last backup time, and the error if one fails.
+
+**Restoring** (to a new VPS, or after a disaster):
+
+1. In the R2 dashboard, open the bucket's `db/` folder, download the newest `.db.gz`, rename it `restore.db.gz`,
+   and copy it into the project folder on the VPS.
+2. Stop the app and swap the database in. The volume name is `<folder>_ithelpdesk-data`; `docker volume ls` shows it.
+
+```bash
+docker compose down
+```
+
+```bash
+docker run --rm -v it-helpdesk_ithelpdesk-data:/data -v "$PWD":/restore busybox sh -c 'rm -f /data/helpdesk.db-wal /data/helpdesk.db-shm && gunzip -c /restore/restore.db.gz > /data/helpdesk.db && chown 1000:1000 /data/helpdesk.db'
+```
+
+```bash
+docker compose up -d
+```
+
+3. Screenshots: copy the files under `uploads/` in the bucket back into the volume's `uploads/` folder (for example
+   with `rclone copy`). Chats work without them; only old attachments would be missing.
+
 ## Updating
 
 ```bash
 cd /home/deploy/it-helpdesk && git pull && docker compose up -d --build
 ```
 
-## Backups
+## Manual backup
 
-Everything (database and screenshots) is in the `ithelpdesk-data` volume:
+Automatic R2 backups are covered in section 6. For a one-off local copy, everything (database and screenshots) is in
+the `ithelpdesk-data` volume:
 
 ```bash
 docker run --rm -v it-helpdesk_ithelpdesk-data:/data -v "$PWD":/backup busybox tar czf /backup/it-helpdesk-$(date +%F).tgz -C /data .

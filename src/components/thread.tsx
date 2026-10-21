@@ -1,10 +1,11 @@
 'use client';
 
-import { Building2, CheckCircle2, History, Loader2, MoreHorizontal, Pencil, RotateCcw, Trash2, User } from 'lucide-react';
+import { Building2, CheckCircle2, ChevronDown, History, Loader2, MoreHorizontal, Pencil, RotateCcw, Trash2, User } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { Dropdown, type DropdownOption } from '@/components/dropdown';
 import { MODE_ICONS } from '@/components/mode-icon';
 import { ResearchBar, ResearchDrawer } from '@/components/research';
 import { ReplyComposer, type ComposerSubmit, type ReplyComposerHandle } from '@/components/reply-composer';
@@ -507,7 +508,7 @@ function Header({
             label="Request type"
             value={problem.mode}
             onChange={(value) => void patch({ mode: value })}
-            options={MODES.map((m) => ({ value: m.key, label: m.label }))}
+            options={MODES.map((m) => ({ value: m.key, label: m.label, icon: <ModeIcon mode={m.key} /> }))}
           />
           {problem.categories.map((c) => (
             <span key={c} className="rounded-full bg-zinc-100 px-2 py-0.5 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
@@ -592,7 +593,7 @@ function ModeIcon({ mode }: { mode: Problem['mode'] }) {
   return <Icon className="size-3.5" />;
 }
 
-/** A small pill that is really a native select: accessible and works on phones. */
+/** A small pill in the header that opens a themed picker. */
 function ChipSelect({
   icon,
   label,
@@ -603,27 +604,23 @@ function ChipSelect({
   icon: React.ReactNode;
   label: string;
   value: string;
-  options: { value: string; label: string }[];
+  options: DropdownOption<string>[];
   onChange: (value: string) => void;
 }) {
   return (
-    <label
-      title={label}
-      className="flex cursor-pointer items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-    >
-      {icon}
-      <select
-        aria-label={label}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="max-w-[10rem] cursor-pointer truncate bg-transparent outline-none"
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <Dropdown
+      label={label}
+      value={value}
+      options={options}
+      onChange={onChange}
+      className="flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+      renderTrigger={(selected) => (
+        <>
+          {icon}
+          <span className="max-w-[10rem] truncate">{selected?.label ?? label}</span>
+          <ChevronDown className="size-3 shrink-0 opacity-60" />
+        </>
+      )}
+    />
   );
 }

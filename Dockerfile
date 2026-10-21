@@ -14,8 +14,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 # --- deps -------------------------------------------------------------------
 FROM base AS deps
-# Compilers are only a fallback: better-sqlite3 downloads a prebuilt binary
-# when one matches the server's CPU, and builds from source when it doesn't.
+# better-sqlite3 ships prebuilt binaries for x64 and arm64, and package.json
+# tells npm to skip its source build. The compilers are only a fallback for an
+# npm that ignores that setting.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*

@@ -16,6 +16,11 @@ tries that fix first.
   use it, where you used it, and a 1-5 danger rating. A pattern check sets a floor on the rating, so a destructive
   command is flagged even if the AI under-rates it, and it is also flagged inline in the chat.
 
+- **Desktop app.** Installs from Edge or Chrome as its own app window with a taskbar icon. It is a window onto the
+  server, so history is the same everywhere.
+- **Off-site backups.** A daily database snapshot and new screenshots go to a Cloudflare R2 bucket, with 30 days of
+  history and status in Settings.
+
 ## How it stays fast
 
 - **One model call per step, streamed.** Words appear within a second or two instead of waiting for the full answer.

@@ -135,6 +135,17 @@ export interface SavedCommand {
   uses: CommandUse[];
 }
 
+/** Off-site backup state shown in Settings. */
+export interface BackupStatus {
+  configured: boolean;
+  bucket: string | null;
+  running: boolean;
+  lastAt: number | null;
+  lastSize: number | null;
+  lastError: string | null;
+  lastErrorAt: number | null;
+}
+
 /** What the problem page polls while background research runs. */
 export interface ResearchSnapshot {
   status: ResearchStatus;

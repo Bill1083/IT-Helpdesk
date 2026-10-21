@@ -4,6 +4,7 @@ import { AlertTriangle, Apple, Check, ChevronDown, Copy, Monitor, Search, Shield
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
+import { Dropdown } from '@/components/dropdown';
 import { DANGER_LEVELS, dangerLabel } from '@/lib/commands';
 import { api, cn, shortDate } from '@/lib/client';
 import type { CommandPlatform, SavedCommand } from '@/lib/types';
@@ -131,16 +132,24 @@ export function CommandsView({ initial }: { initial: SavedCommand[] }) {
               </button>
             )}
           </div>
-          <select
+          <Dropdown
+            label="Sort"
             value={sort}
-            onChange={(e) => setSort(e.target.value as Sort)}
-            aria-label="Sort"
-            className="rounded-lg border border-zinc-200 bg-white px-2 py-2 text-sm outline-none dark:border-zinc-700 dark:bg-zinc-900"
-          >
-            <option value="recent">Most recent</option>
-            <option value="used">Most used</option>
-            <option value="danger">Riskiest first</option>
-          </select>
+            onChange={setSort}
+            align="right"
+            options={[
+              { value: 'recent', label: 'Most recent' },
+              { value: 'used', label: 'Most used' },
+              { value: 'danger', label: 'Riskiest first' },
+            ]}
+            className="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+            renderTrigger={(selected) => (
+              <>
+                {selected?.label}
+                <ChevronDown className="size-4 text-zinc-400" />
+              </>
+            )}
+          />
         </div>
 
         <details className="group mt-3 text-sm text-zinc-500">

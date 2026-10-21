@@ -50,6 +50,23 @@ export const env = {
     return read('ANTHROPIC_MODEL') ?? 'claude-opus-5-5';
   },
 
+  // --- Off-site backups to Cloudflare R2 (all four needed to turn them on) ---
+  get r2AccountId(): string | undefined {
+    return read('R2_ACCOUNT_ID');
+  },
+  get r2AccessKeyId(): string | undefined {
+    return read('R2_ACCESS_KEY_ID');
+  },
+  get r2SecretAccessKey(): string | undefined {
+    return read('R2_SECRET_ACCESS_KEY');
+  },
+  get r2Bucket(): string | undefined {
+    return read('R2_BUCKET');
+  },
+  get backupKeepDays(): number {
+    return readNumber('BACKUP_KEEP_DAYS', 30);
+  },
+
   get similarityThreshold(): number {
     const value = readNumber('SIMILARITY_THRESHOLD', 0.72);
     return value < 1 ? value : 0.72;

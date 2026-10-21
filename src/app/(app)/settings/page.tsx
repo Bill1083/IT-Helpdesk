@@ -1,5 +1,6 @@
 import { SettingsForm } from '@/components/settings-form';
 import { aboutProfile, aiStatus } from '@/lib/ai/engine';
+import { backupStatus } from '@/lib/backup';
 import { env } from '@/lib/env';
 import { DEFAULT_ABOUT } from '@/lib/prompts';
 import { listEnvironments } from '@/lib/repo';
@@ -18,6 +19,8 @@ export default function SettingsPage() {
       fastModel={env.geminiFastModel}
       researchModel={env.geminiResearchModel}
       rememberDays={env.rememberDays}
+      backup={backupStatus()}
+      backupKeepDays={env.backupKeepDays}
     />
   );
 }

@@ -1,11 +1,12 @@
 'use client';
 
-import { Building2, CheckCircle2, LogOut, Monitor, Moon, Plus, Search, Settings, Sun, Terminal, Wrench, X } from 'lucide-react';
+import { Building2, CheckCircle2, ChevronDown, LogOut, Monitor, Moon, Plus, Search, Settings, Sun, Terminal, Wrench, X } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { Dropdown } from '@/components/dropdown';
 import { MODE_ICONS } from '@/components/mode-icon';
 import { PROBLEMS_CHANGED, api, cn, shortDate } from '@/lib/client';
 import type { ProblemListItem } from '@/lib/types';
@@ -111,23 +112,25 @@ export function Sidebar({ initialProblems, environments }: { initialProblems: Pr
           <Terminal className="size-4" /> Useful commands
         </Link>
         {environments.length > 0 && (
-          <label className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-200/60 dark:text-zinc-300 dark:hover:bg-zinc-800">
-            <Building2 className="size-4 shrink-0" />
-            <select
-              value={activeFilter}
-              onChange={(e) => changeFilter(e.target.value)}
-              aria-label="Filter by environment"
-              className="min-w-0 flex-1 cursor-pointer truncate bg-transparent outline-none"
-            >
-              <option value="all">All environments</option>
-              {environments.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.name}
-                </option>
-              ))}
-              <option value="none">No environment</option>
-            </select>
-          </label>
+          <Dropdown
+            label="Filter by environment"
+            value={activeFilter}
+            onChange={changeFilter}
+            options={[
+              { value: 'all', label: 'All environments' },
+              ...environments.map((e) => ({ value: e.id, label: e.name })),
+              { value: 'none', label: 'No environment' },
+            ]}
+            wrapperClassName="w-full"
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-200/60 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            renderTrigger={(selected) => (
+              <>
+                <Building2 className="size-4 shrink-0" />
+                <span className="min-w-0 flex-1 truncate text-left">{selected?.label ?? 'All environments'}</span>
+                <ChevronDown className="size-4 shrink-0 text-zinc-400" />
+              </>
+            )}
+          />
         )}
         <div className="relative pt-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 mt-0.5 size-4 -translate-y-1/2 text-zinc-400" />

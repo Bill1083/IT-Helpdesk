@@ -1,11 +1,13 @@
 import type { Metadata, Viewport } from 'next';
 
+import { PwaSetup } from '@/components/pwa';
 import { ThemeProvider } from '@/components/theme-provider';
 
 import './globals.css';
 
 export const metadata: Metadata = {
   title: 'IT Desk',
+  applicationName: 'IT Desk',
   description: 'Personal IT problem solver',
   robots: { index: false, follow: false },
 };
@@ -26,6 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           {children}
         </ThemeProvider>
+        <PwaSetup />
       </body>
     </html>
   );

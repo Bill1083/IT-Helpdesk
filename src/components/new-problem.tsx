@@ -1,11 +1,12 @@
 'use client';
 
-import { ArrowUp, Building2, History, Loader2, Sparkles, User } from 'lucide-react';
+import { ArrowUp, Building2, ChevronDown, History, Loader2, Sparkles, User } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
 import { AttachButton, AttachmentList, useAttachments } from '@/components/attachments';
+import { Dropdown } from '@/components/dropdown';
 import { MODE_ICONS } from '@/components/mode-icon';
 import type { EnvironmentOption } from '@/components/sidebar';
 import { api, cn, notifyProblemsChanged, shortDate } from '@/lib/client';
@@ -156,25 +157,22 @@ export function NewProblem({
               </datalist>
             </label>
             {environments.length > 0 && (
-              <label
-                title="Which client this is for"
-                className="flex max-w-[40%] shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              >
-                <Building2 className="size-4 shrink-0" />
-                <select
-                  value={environmentId}
-                  onChange={(e) => setEnvironmentId(e.target.value)}
-                  aria-label="Environment"
-                  className="min-w-0 cursor-pointer truncate bg-transparent text-zinc-800 outline-none dark:text-zinc-200"
-                >
-                  {environments.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.name}
-                    </option>
-                  ))}
-                  <option value="">No environment</option>
-                </select>
-              </label>
+              <Dropdown
+                label="Which client this is for"
+                value={environmentId}
+                onChange={setEnvironmentId}
+                options={[...environments.map((e) => ({ value: e.id, label: e.name })), { value: '', label: 'No environment' }]}
+                align="right"
+                wrapperClassName="max-w-[40%] shrink-0"
+                className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-zinc-800 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                renderTrigger={(selected) => (
+                  <>
+                    <Building2 className="size-4 shrink-0 text-zinc-500" />
+                    <span className="min-w-0 truncate">{selected?.label ?? 'No environment'}</span>
+                    <ChevronDown className="size-3.5 shrink-0 text-zinc-400" />
+                  </>
+                )}
+              />
             )}
             <button
               type="button"
