@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# IT Desk - single-host deployment.
+#
+#   docker compose up -d --build
+#
+# Published on 127.0.0.1 only, so it is reachable solely through the host's
+# Nginx reverse proxy (see nginx.conf). Set PORT in .env (default 7891).
+# ---------------------------------------------------------------------------
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: it-helpdesk:latest
+    container_name: it-helpdesk
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Inside the container the app always listens on 3000; PORT in .env is
+      # only the host side of the mapping below.
+      PORT: 3000
+      DATA_DIR: /app/data
+    ports:
+      - "127.0.0.1:${PORT:-7891}:3000"
+    volumes:
+      # Named volume keeps the database and screenshots across rebuilds.
+      - ithelpdesk-data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  ithelpdesk-data:
+    driver: local
