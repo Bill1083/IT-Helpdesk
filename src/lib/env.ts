@@ -63,6 +63,10 @@ export const env = {
   get r2Bucket(): string | undefined {
     return read('R2_BUCKET');
   },
+  /** Only for EU/FedRAMP jurisdiction buckets; otherwise built from the account ID. */
+  get r2Endpoint(): string | undefined {
+    return read('R2_ENDPOINT');
+  },
   get backupKeepDays(): number {
     return readNumber('BACKUP_KEEP_DAYS', 30);
   },

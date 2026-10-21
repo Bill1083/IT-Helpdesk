@@ -1,18 +1,32 @@
 'use client';
 
-import { Building2, CheckCircle2, ChevronDown, History, Loader2, MoreHorizontal, Pencil, RotateCcw, Trash2, User } from 'lucide-react';
+import {
+  Building2,
+  CheckCircle2,
+  ChevronDown,
+  History,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  RotateCcw,
+  Sparkles,
+  Trash2,
+  User,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 
 import { Dropdown, type DropdownOption } from '@/components/dropdown';
+import { ErrorNotice } from '@/components/error-notice';
 import { MODE_ICONS } from '@/components/mode-icon';
-import { ResearchBar, ResearchDrawer } from '@/components/research';
 import { ReplyComposer, type ComposerSubmit, type ReplyComposerHandle } from '@/components/reply-composer';
+import { ResearchBar, ResearchDrawer } from '@/components/research';
 import type { EnvironmentOption } from '@/components/sidebar';
-import { StepBlock, StreamingStep, UserBubble } from '@/components/step';
+import { AnswerBlock, ReportBubble, RequestCard, StepItem, StreamingAnswer } from '@/components/step';
 import { api, cn, longDate, notifyProblemsChanged, readNdjson, shortDate } from '@/lib/client';
-import { MODES } from '@/lib/modes';
+import { MODES, modeLabel } from '@/lib/modes';
 import type { Message, Problem, Provider, ResearchSnapshot, SimilarProblem, StreamEvent } from '@/lib/types';
 import type { ProblemView } from '@/lib/views';
 
@@ -38,6 +52,18 @@ function toResearch(problem: Problem): ResearchSnapshot {
     summary: problem.summary,
     mode: problem.mode,
   };
+}
+
+/** Each step with the reports that came back on it. */
+function groupSteps(messages: Message[]): { steps: { message: Message; reports: Message[] }[]; loose: Message[] } {
+  const steps: { message: Message; reports: Message[] }[] = [];
+  const loose: Message[] = [];
+  for (const m of messages) {
+    if (m.role === 'assistant') steps.push({ message: m, reports: [] });
+    else if (steps.length) steps[steps.length - 1].reports.push(m);
+    else loose.push(m);
+  }
+  return { steps, loose };
 }
 
 export function Thread({
@@ -171,7 +197,7 @@ export function Thread({
     [id, refresh, scrollToBottom],
   );
 
-  // First step for a problem that was just logged.
+  // First reply for a problem that was just logged.
   useEffect(() => {
     if (started.current) return;
     started.current = true;
@@ -210,6 +236,7 @@ export function Thread({
         setProblem(view.problem);
         setMessages(view.messages);
         notifyProblemsChanged();
+        toast.success(problem.mode === 'fix' ? 'Marked resolved, saved for next time' : 'Marked done');
         requestAnimationFrame(() => scrollToBottom(true));
         return true;
       } catch (e) {
@@ -235,13 +262,24 @@ export function Thread({
     await api(`/api/problems/${id}`, { method: 'PATCH', json: { status: 'open' } });
     await refresh();
     notifyProblemsChanged();
+    toast('Reopened');
   }
 
   const busy = Boolean(streaming) || resolving;
-  const lastAssistant = messages.map((m) => m.role).lastIndexOf('assistant');
-  const lastIsUser = messages[messages.length - 1]?.role === 'user';
   const isOpen = problem.status === 'open';
+  const fixing = problem.mode === 'fix';
+  const start = messages.find((m) => m.kind === 'start');
+  const rest = messages.filter((m) => m !== start);
   const needsFirstStep = !streaming && !messages.some((m) => m.role === 'assistant');
+  const lastIsUser = messages[messages.length - 1]?.role === 'user';
+  const { steps, loose } = groupSteps(rest);
+  const actions = {
+    problemId: id,
+    claudeAvailable: ai.claude,
+    retryLabel: fixing ? 'Try another way' : 'Regenerate',
+    onThinkHarder: () => void runTurn({ regenerate: true, provider: 'claude' }),
+    onRetry: () => void runTurn({ regenerate: true, provider: 'gemini' }),
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -262,70 +300,87 @@ export function Thread({
       />
 
       <div ref={scroller} className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6">
+        <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6 sm:py-8">
+          {start && <RequestCard message={start} reporter={problem.reporter} />}
+          {similar.length > 0 && <SimilarCards items={similar} />}
           <ResearchBar research={research} canStart={ai.gemini && !needsFirstStep} onOpen={() => setDrawer(true)} onDigDeeper={digDeeper} />
 
-          {messages.map((m, index) => (
-            <div key={m.id}>
-              {m.role === 'user' ? (
-                <UserBubble message={m} />
-              ) : (
-                <StepBlock
-                  message={m}
-                  problemId={id}
-                  isLatest={index === lastAssistant && !streaming}
-                  canAct={isOpen && !busy && index === messages.length - 1}
-                  claudeAvailable={ai.claude}
-                  retryLabel={problem.mode === 'fix' ? 'Try another way' : 'Regenerate'}
-                  onThinkHarder={() => void runTurn({ regenerate: true, provider: 'claude' })}
-                  onRetry={() => void runTurn({ regenerate: true, provider: 'gemini' })}
-                />
-              )}
-              {m.kind === 'start' && similar.length > 0 && <SimilarBanner items={similar} />}
-            </div>
+          {loose.map((m) => (
+            <ReportBubble key={m.id} message={m} />
           ))}
 
-          {streaming && <StreamingStep text={streaming.text} status={streaming.status} />}
+          {fixing ? (
+            (steps.length > 0 || streaming) && (
+              <ol className="pt-2">
+                {steps.map((s, index) => {
+                  const isLatest = index === steps.length - 1 && !streaming;
+                  return (
+                    <StepItem
+                      key={s.message.id}
+                      number={index + 1}
+                      message={s.message}
+                      reports={s.reports}
+                      isLatest={isLatest}
+                      isLast={index === steps.length - 1 && !streaming}
+                      canAct={isOpen && !busy && isLatest && s.reports.length === 0}
+                      {...actions}
+                    />
+                  );
+                })}
+                {streaming && <StreamingAnswer text={streaming.text} status={streaming.status} variant="step" number={steps.length + 1} />}
+              </ol>
+            )
+          ) : (
+            <div className="space-y-6 pt-1">
+              {rest.map((m, index) =>
+                m.role === 'user' ? (
+                  <ReportBubble key={m.id} message={m} />
+                ) : (
+                  <AnswerBlock key={m.id} message={m} canAct={isOpen && !busy && index === rest.length - 1} {...actions} />
+                ),
+              )}
+              {streaming && <StreamingAnswer text={streaming.text} status={streaming.status} variant="chat" number={0} />}
+            </div>
+          )}
 
           {error && (
-            <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-              <span className="min-w-0 flex-1 break-words">{error}</span>
-              {lastIsUser && (
-                <button
-                  onClick={() => void runTurn({ regenerate: true })}
-                  className="flex shrink-0 items-center gap-1 font-medium hover:underline"
-                >
-                  <RotateCcw className="size-3.5" /> Retry
-                </button>
-              )}
-            </div>
+            <ErrorNotice
+              error={error}
+              context="ai"
+              onRetry={lastIsUser || needsFirstStep ? () => void runTurn({ regenerate: true }) : undefined}
+            />
           )}
 
           {needsFirstStep && !error && isOpen && ai.gemini && (
             <button
               onClick={() => void runTurn({})}
-              className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-900"
+              className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:brightness-110"
             >
-              Get an answer
+              <Sparkles className="size-4" /> Get an answer
             </button>
           )}
 
           {!isOpen && (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 dark:border-emerald-900 dark:bg-emerald-950/30">
+            <div className="animate-fade-up rounded-2xl bg-emerald-500/[0.07] p-4 ring-1 ring-inset ring-emerald-500/20 sm:p-5">
               <div className="flex items-center justify-between gap-3">
-                <p className="flex items-center gap-2 font-medium text-emerald-800 dark:text-emerald-300">
-                  <CheckCircle2 className="size-5" /> {problem.mode === 'fix' ? 'Resolved' : 'Done'}
+                <p className="flex items-center gap-2 font-semibold text-emerald-800 dark:text-emerald-300">
+                  <span className="flex size-7 items-center justify-center rounded-full bg-emerald-500 text-white">
+                    <CheckCircle2 className="size-4" />
+                  </span>
+                  {fixing ? 'Resolved' : 'Done'}
                   {problem.resolvedAt && (
-                    <span className="text-sm font-normal text-emerald-700/80 dark:text-emerald-400/80" suppressHydrationWarning>
+                    <span className="text-sm font-normal text-emerald-700/70 dark:text-emerald-400/70" suppressHydrationWarning>
                       {shortDate(problem.resolvedAt)}
                     </span>
                   )}
                 </p>
-                <button onClick={reopen} className="text-sm text-emerald-800 hover:underline dark:text-emerald-300">
+                <button onClick={reopen} className="text-sm font-medium text-emerald-800 hover:underline dark:text-emerald-300">
                   Reopen
                 </button>
               </div>
-              {problem.resolution && <p className="mt-2 text-sm text-emerald-900 dark:text-emerald-200">{problem.resolution}</p>}
+              {problem.resolution && (
+                <p className="mt-2.5 pl-9 text-[14.5px] leading-relaxed text-emerald-950 dark:text-emerald-100">{problem.resolution}</p>
+              )}
             </div>
           )}
           <div ref={bottom} />
@@ -333,7 +388,7 @@ export function Thread({
       </div>
 
       {isOpen && (
-        <div className="border-t border-zinc-100 bg-white pt-3 dark:border-zinc-900 dark:bg-zinc-950">
+        <div className="bg-gradient-to-t from-white via-white to-white/0 pt-4 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950/0">
           {!ai.gemini && (
             <p className="mx-auto max-w-3xl px-4 pb-2 text-xs text-amber-700 dark:text-amber-400">
               GEMINI_API_KEY isn&apos;t set on the server yet, so the AI can&apos;t answer.
@@ -348,28 +403,38 @@ export function Thread({
   );
 }
 
-function SimilarBanner({ items }: { items: SimilarProblem[] }) {
+function SimilarCards({ items }: { items: SimilarProblem[] }) {
   return (
-    <div className="mt-4 space-y-2">
+    <div className="space-y-2">
       {items.map((s) => (
         <Link
           key={s.id}
           href={`/p/${s.id}`}
-          className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm transition hover:border-amber-300 dark:border-amber-900/60 dark:bg-amber-950/30 dark:hover:border-amber-800"
+          className="group flex animate-fade-up gap-3 rounded-xl bg-amber-500/[0.06] px-4 py-3 text-sm ring-1 ring-inset ring-amber-500/20 transition hover:bg-amber-500/[0.1]"
         >
-          <History className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-          <div className="min-w-0">
-            <p className="text-amber-950 dark:text-amber-100">
-              <span className="font-medium">
-                {s.score > 0 ? 'This sounds like' : 'Possibly related:'} an issue from{' '}
-                <span suppressHydrationWarning>{longDate(s.createdAt)}</span>
-                {s.environmentName ? ` at ${s.environmentName}` : ''}
-                {s.reporter ? ` (${s.reporter})` : ''}:
-              </span>{' '}
-              {s.summary || s.title || s.description}
+          <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300">
+            <History className="size-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-700/80 dark:text-amber-300/80">
+              {s.score > 0 ? 'Seen before' : 'Possibly related'} · <span suppressHydrationWarning>{longDate(s.createdAt)}</span>
+              {s.environmentName ? ` · ${s.environmentName}` : ''}
+              {s.reporter ? ` · ${s.reporter}` : ''}
             </p>
-            <p className="mt-1 text-amber-800/90 dark:text-amber-300/90">
-              {s.resolution ? <>Fixed by: {s.resolution}</> : s.status === 'open' ? 'Still open.' : 'Resolved, no fix recorded.'}
+            <p className="mt-0.5 text-zinc-800 dark:text-zinc-200">{s.summary || s.title || s.description}</p>
+            <p className="mt-1.5 flex items-start gap-1.5 text-zinc-600 dark:text-zinc-400">
+              {s.resolution ? (
+                <>
+                  <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <span>
+                    <span className="font-medium text-zinc-800 dark:text-zinc-200">Fixed by:</span> {s.resolution}
+                  </span>
+                </>
+              ) : s.status === 'open' ? (
+                'Still open.'
+              ) : (
+                'Resolved, no fix recorded.'
+              )}
             </p>
           </div>
         </Link>
@@ -415,21 +480,23 @@ function Header({
     }
   }
 
-  async function patch(json: Record<string, unknown>) {
+  async function patch(json: Record<string, unknown>, done: string) {
     try {
       const { problem: updated } = await api<{ problem: Problem }>(`/api/problems/${problem.id}`, { method: 'PATCH', json });
       onChanged(updated);
-    } catch {
-      // leave it as it was
+      toast.success(done);
+    } catch (e) {
+      toast.error("Couldn't save that", { description: e instanceof Error ? e.message : undefined });
     }
   }
 
   async function remove() {
     setMenu(false);
-    if (!window.confirm('Delete this problem and its whole history? This cannot be undone.')) return;
+    if (!window.confirm('Delete this chat and its whole history? This cannot be undone.')) return;
     setDeleting(true);
     try {
       await api(`/api/problems/${problem.id}`, { method: 'DELETE' });
+      toast('Chat deleted');
       onDeleted();
     } finally {
       setDeleting(false);
@@ -437,9 +504,11 @@ function Header({
   }
 
   const title = problem.title || problem.description.split('\n')[0].slice(0, 90);
+  const envName = (id: string) => environments.find((e) => e.id === id)?.name ?? 'No environment';
+  const done = problem.status !== 'open';
 
   return (
-    <header className="flex items-start gap-3 border-b border-zinc-100 px-4 py-3 pl-14 md:pl-6 dark:border-zinc-900">
+    <header className="z-20 flex items-start gap-3 border-b border-zinc-200/70 bg-white/85 px-4 py-3 pl-14 backdrop-blur-md md:px-6 dark:border-zinc-800/70 dark:bg-zinc-950/85">
       <div className="min-w-0 flex-1">
         {editing === 'title' ? (
           <input
@@ -451,10 +520,10 @@ function Header({
               if (e.key === 'Enter') void save();
               if (e.key === 'Escape') setEditing(null);
             }}
-            className="w-full rounded-md bg-zinc-100 px-2 py-0.5 text-lg font-semibold outline-none dark:bg-zinc-800"
+            className="w-full rounded-lg bg-zinc-100 px-2 py-0.5 text-[17px] font-semibold outline-none ring-2 ring-accent/40 dark:bg-zinc-800"
           />
         ) : (
-          <h1 className="group flex items-center gap-2 truncate text-lg font-semibold tracking-tight">
+          <h1 className="group flex items-center gap-2 truncate text-[17px] font-semibold tracking-tight">
             <span className="truncate">{title}</span>
             <button
               aria-label="Rename"
@@ -462,13 +531,13 @@ function Header({
                 setDraft(problem.title ?? title);
                 setEditing('title');
               }}
-              className="shrink-0 text-zinc-400 opacity-0 transition hover:text-zinc-700 group-hover:opacity-100 dark:hover:text-zinc-200"
+              className="shrink-0 rounded p-0.5 text-zinc-400 opacity-0 transition hover:text-zinc-700 group-hover:opacity-100 dark:hover:text-zinc-200"
             >
               <Pencil className="size-3.5" />
             </button>
           </h1>
         )}
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500">
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
           {editing === 'reporter' ? (
             <input
               autoFocus
@@ -480,7 +549,7 @@ function Header({
                 if (e.key === 'Escape') setEditing(null);
               }}
               placeholder="Who reported it?"
-              className="rounded bg-zinc-100 px-1.5 py-0.5 outline-none dark:bg-zinc-800"
+              className="rounded-full bg-zinc-100 px-2.5 py-1 outline-none ring-2 ring-accent/40 dark:bg-zinc-800"
             />
           ) : (
             <button
@@ -488,46 +557,47 @@ function Header({
                 setDraft(problem.reporter ?? '');
                 setEditing('reporter');
               }}
-              className="flex items-center gap-1 hover:text-zinc-800 dark:hover:text-zinc-200"
+              className={chipClass}
               title="Edit who reported it"
             >
               <User className="size-3.5" /> {problem.reporter || 'Add reporter'}
             </button>
           )}
-          <span>·</span>
-          <time suppressHydrationWarning>{longDate(problem.createdAt)}</time>
           <ChipSelect
             icon={<Building2 className="size-3.5" />}
             label="Environment"
             value={problem.environmentId ?? ''}
-            onChange={(value) => void patch({ environmentId: value || null })}
+            onChange={(value) => void patch({ environmentId: value || null }, `Moved to ${envName(value)}`)}
             options={[...environments.map((e) => ({ value: e.id, label: e.name })), { value: '', label: 'No environment' }]}
           />
           <ChipSelect
             icon={<ModeIcon mode={problem.mode} />}
             label="Request type"
             value={problem.mode}
-            onChange={(value) => void patch({ mode: value })}
+            onChange={(value) => void patch({ mode: value }, `Switched to ${modeLabel(value as Problem['mode'])}`)}
             options={MODES.map((m) => ({ value: m.key, label: m.label, icon: <ModeIcon mode={m.key} /> }))}
           />
           {problem.categories.map((c) => (
-            <span key={c} className="rounded-full bg-zinc-100 px-2 py-0.5 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+            <span key={c} className="hidden rounded-full px-2 py-1 text-zinc-500 ring-1 ring-inset ring-zinc-200 sm:inline dark:ring-zinc-800">
               {categoryLabels[c] ?? c}
             </span>
           ))}
+          <time suppressHydrationWarning className="pl-1 text-zinc-400">
+            {longDate(problem.createdAt)}
+          </time>
         </div>
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
-        {problem.status === 'open' ? (
+        {!done ? (
           <button
             onClick={onResolve}
-            className="hidden items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm font-medium transition hover:bg-zinc-50 sm:flex dark:border-zinc-700 dark:hover:bg-zinc-800"
+            className="hidden items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-sm font-medium shadow-sm ring-1 ring-zinc-200 transition hover:ring-zinc-300 sm:flex dark:bg-zinc-900 dark:ring-zinc-800 dark:hover:ring-zinc-700"
           >
             <CheckCircle2 className="size-4 text-emerald-600" /> {problem.mode === 'fix' ? 'Mark resolved' : 'Mark done'}
           </button>
         ) : (
-          <span className="hidden items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800 sm:flex dark:bg-emerald-900/40 dark:text-emerald-300">
+          <span className="hidden items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-500/20 sm:flex dark:text-emerald-300">
             <CheckCircle2 className="size-3.5" /> {problem.mode === 'fix' ? 'Resolved' : 'Done'}
           </span>
         )}
@@ -535,15 +605,15 @@ function Header({
           <button
             aria-label="More actions"
             onClick={() => setMenu((v) => !v)}
-            className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            className="rounded-lg p-2 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
           >
             {deleting ? <Loader2 className="size-4 animate-spin" /> : <MoreHorizontal className="size-4" />}
           </button>
           {menu && (
             <>
               <button aria-label="Close menu" className="fixed inset-0 z-10 cursor-default" onClick={() => setMenu(false)} />
-              <div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-xl border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-                {problem.status === 'open' ? (
+              <div className="absolute right-0 z-20 mt-1 w-52 animate-pop-in overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-lift dark:border-zinc-700 dark:bg-zinc-900">
+                {!done ? (
                   <MenuItem
                     onClick={() => {
                       setMenu(false);
@@ -563,7 +633,7 @@ function Header({
                   </MenuItem>
                 )}
                 <MenuItem onClick={remove} danger>
-                  <Trash2 className="size-4" /> Delete problem
+                  <Trash2 className="size-4" /> Delete chat
                 </MenuItem>
               </div>
             </>
@@ -574,13 +644,16 @@ function Header({
   );
 }
 
+const chipClass =
+  'inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-600 transition hover:bg-zinc-200 hover:text-zinc-900 dark:bg-zinc-800/80 dark:text-zinc-300 dark:hover:bg-zinc-700 dark:hover:text-zinc-100';
+
 function MenuItem({ onClick, children, danger }: { onClick: () => void; children: React.ReactNode; danger?: boolean }) {
   return (
     <button
       onClick={onClick}
       className={cn(
-        'flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800',
-        danger && 'text-red-600 dark:text-red-400',
+        'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition hover:bg-zinc-100 dark:hover:bg-zinc-800',
+        danger && 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40',
       )}
     >
       {children}
@@ -613,7 +686,7 @@ function ChipSelect({
       value={value}
       options={options}
       onChange={onChange}
-      className="flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+      className={chipClass}
       renderTrigger={(selected) => (
         <>
           {icon}

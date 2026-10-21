@@ -1,26 +1,27 @@
 'use client';
 
 import { AlertTriangle, ArrowUp, Ban, CheckCircle2, Globe, Loader2, XCircle } from 'lucide-react';
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
 
 import { AttachButton, AttachmentList, useAttachments } from '@/components/attachments';
+import { useAutosize } from '@/components/use-autosize';
 import { cn } from '@/lib/client';
 import type { Attachment, Mode, ReportKind } from '@/lib/types';
 
 type Outcome = Exclude<ReportKind, 'start' | 'note'>;
 
 const OUTCOMES: { kind: Outcome; label: string; icon: typeof CheckCircle2; active: string }[] = [
-  { kind: 'worked', label: 'Fixed it', icon: CheckCircle2, active: 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' },
-  { kind: 'failed', label: "Didn't work", icon: XCircle, active: 'border-red-400 bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-300' },
-  { kind: 'error', label: 'Different error', icon: AlertTriangle, active: 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300' },
-  { kind: 'cant', label: "Can't do this step", icon: Ban, active: 'border-zinc-400 bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200' },
+  { kind: 'worked', label: 'Fixed it', icon: CheckCircle2, active: 'bg-emerald-500 text-white ring-emerald-500 shadow-sm' },
+  { kind: 'failed', label: "Didn't work", icon: XCircle, active: 'bg-red-500 text-white ring-red-500 shadow-sm' },
+  { kind: 'error', label: 'Different error', icon: AlertTriangle, active: 'bg-amber-500 text-white ring-amber-500 shadow-sm' },
+  { kind: 'cant', label: "Can't do this step", icon: Ban, active: 'bg-zinc-600 text-white ring-zinc-600 shadow-sm dark:bg-zinc-500' },
 ];
 
 const PLACEHOLDERS: Record<Outcome | 'none' | 'chat' | 'done', string> = {
-  none: 'Report back: what happened? Paste errors or screenshots…',
+  none: 'Pick a result above, or tell it what happened…',
   chat: 'Ask a follow-up, or tell it what you found…',
-  done: 'What was the outcome? (optional - saved for next time)',
-  worked: 'What fixed it? (optional - saved so next time is instant)',
+  done: 'What was the outcome? (optional, saved for next time)',
+  worked: 'What fixed it? (optional, saved so next time is instant)',
   failed: 'What did you see instead? Paste the error if there was one…',
   error: 'Paste the new error message or a screenshot…',
   cant: "Why not? (no admin rights, setting missing, user unavailable…)",
@@ -56,16 +57,10 @@ export const ReplyComposer = forwardRef<
     },
   }));
 
-  useEffect(() => {
-    const el = textarea.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
-    // Only show a scrollbar once the text outgrows the cap.
-    el.style.overflowY = el.scrollHeight > 240 ? 'auto' : 'hidden';
-  }, [text]);
+  useAutosize(textarea, text, 240);
 
   const canSend = !busy && !disabled && !files.uploading && (kind !== null || text.trim().length > 0 || files.attachments.length > 0);
+  const resolving = kind === 'worked';
 
   async function send() {
     if (!canSend) return;
@@ -80,33 +75,38 @@ export const ReplyComposer = forwardRef<
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 pb-4">
-      <div className={cn('mb-2 flex flex-wrap gap-1.5', !fixing && 'hidden')}>
-        {OUTCOMES.map(({ kind: k, label, icon: Icon, active }) => (
-          <button
-            key={k}
-            type="button"
-            onClick={() => {
-              setKind((current) => (current === k ? null : k));
-              textarea.current?.focus();
-            }}
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition',
-              kind === k
-                ? active
-                : 'border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800',
-            )}
-          >
-            <Icon className="size-3.5" /> {label}
-          </button>
-        ))}
-      </div>
+      {fixing && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {OUTCOMES.map(({ kind: k, label, icon: Icon, active }) => (
+            <button
+              key={k}
+              type="button"
+              aria-pressed={kind === k}
+              onClick={() => {
+                setKind((current) => (current === k ? null : k));
+                textarea.current?.focus();
+              }}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] font-medium ring-1 ring-inset transition active:scale-[0.98]',
+                kind === k
+                  ? active
+                  : 'bg-white text-zinc-600 ring-zinc-200 hover:text-zinc-900 hover:ring-zinc-300 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-zinc-800 dark:hover:text-zinc-100 dark:hover:ring-zinc-700',
+              )}
+            >
+              <Icon className="size-3.5" /> {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div
         onDrop={files.onDrop}
         onDragOver={(e) => e.preventDefault()}
         className={cn(
-          'rounded-2xl border bg-white shadow-sm transition dark:bg-zinc-900',
-          kind === 'worked' ? 'border-emerald-400 dark:border-emerald-700' : 'border-zinc-200 focus-within:border-zinc-300 dark:border-zinc-700 dark:focus-within:border-zinc-600',
+          'rounded-2xl bg-white shadow-lift ring-1 transition dark:bg-zinc-900',
+          resolving
+            ? 'ring-2 ring-emerald-500/60'
+            : 'ring-zinc-200 focus-within:ring-2 focus-within:ring-accent/40 dark:ring-zinc-800',
         )}
       >
         <textarea
@@ -122,25 +122,26 @@ export const ReplyComposer = forwardRef<
           }}
           rows={1}
           disabled={disabled}
-          placeholder={PLACEHOLDERS[kind === 'worked' && !fixing ? 'done' : (kind ?? (fixing ? 'none' : 'chat'))]}
-          className="block max-h-60 w-full resize-none bg-transparent px-4 pt-3 text-[15px] leading-relaxed outline-none placeholder:text-zinc-400 disabled:cursor-not-allowed"
+          placeholder={PLACEHOLDERS[resolving && !fixing ? 'done' : (kind ?? (fixing ? 'none' : 'chat'))]}
+          className="block max-h-60 w-full resize-none bg-transparent px-4 pt-3.5 text-[15px] leading-relaxed outline-none placeholder:text-zinc-400 disabled:cursor-not-allowed"
         />
         {(files.attachments.length > 0 || files.uploading) && (
           <div className="px-4 pt-2">
             <AttachmentList attachments={files.attachments} uploading={files.uploading} onRemove={files.remove} />
           </div>
         )}
-        <div className="flex items-center gap-1 px-2 pb-2 pt-1">
+        <div className="flex items-center gap-1 px-2 pb-2 pt-1.5">
           <AttachButton onFiles={(list) => void files.add(list)} />
-          {kind !== 'worked' && (
+          {!resolving && (
             <button
               type="button"
               onClick={() => setSearch((v) => !v)}
-              title="Search the web live for this step (a little slower)"
+              aria-pressed={search}
+              title="Search the web live for this reply (a little slower)"
               className={cn(
                 'inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium transition',
                 search
-                  ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300'
+                  ? 'bg-accent/10 text-accent'
                   : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200',
               )}
             >
@@ -148,22 +149,22 @@ export const ReplyComposer = forwardRef<
             </button>
           )}
           <span className="flex-1" />
-          {files.error && <span className="truncate text-xs text-red-600">{files.error}</span>}
-          {kind === 'worked' && !fixing && (
+          {files.error && <span className="truncate text-xs text-red-600 dark:text-red-400">{files.error}</span>}
+          {resolving && !fixing && (
             <button
               type="button"
               onClick={() => setKind(null)}
-              className="rounded-lg px-2 py-1.5 text-sm text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              className="rounded-lg px-2.5 py-1.5 text-sm text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
               Cancel
             </button>
           )}
-          {kind === 'worked' ? (
+          {resolving ? (
             <button
               type="button"
               onClick={() => void send()}
               disabled={!canSend}
-              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 active:scale-[0.98] disabled:opacity-50"
             >
               {busy ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />} {fixing ? 'Mark resolved' : 'Mark done'}
             </button>
@@ -173,9 +174,9 @@ export const ReplyComposer = forwardRef<
               onClick={() => void send()}
               disabled={!canSend}
               aria-label="Send"
-              className="flex size-9 items-center justify-center rounded-full bg-zinc-900 text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-300 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200 dark:disabled:bg-zinc-700"
+              className="flex size-9 items-center justify-center rounded-full bg-accent text-accent-fg shadow-sm transition hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400 disabled:shadow-none dark:disabled:bg-zinc-800 dark:disabled:text-zinc-600"
             >
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" strokeWidth={2.5} />}
             </button>
           )}
         </div>

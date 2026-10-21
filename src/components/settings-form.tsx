@@ -1,12 +1,29 @@
 'use client';
 
-import { AlertTriangle, Building2, Check, CheckCircle2, CloudUpload, Download, Loader2, Plus, Trash2, XCircle } from 'lucide-react';
+import {
+  AppWindow,
+  Building2,
+  Check,
+  CheckCircle2,
+  CloudUpload,
+  Download,
+  Loader2,
+  Plug,
+  Plus,
+  Sparkles,
+  Trash2,
+  UserRound,
+  XCircle,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { toast } from 'sonner';
 
+import { ErrorDetails, ErrorNotice, HintText } from '@/components/error-notice';
 import { useInstallPrompt } from '@/components/pwa';
-import { api, shortDate } from '@/lib/client';
-import type { BackupStatus, Environment, EnvironmentSummary } from '@/lib/types';
+import { api, cn, shortDate } from '@/lib/client';
+import { explainError } from '@/lib/errors';
+import type { BackupStatus, ConnectionCheck, Environment, EnvironmentSummary } from '@/lib/types';
 
 const PROFILE_TEMPLATE = `- Identity & email: (Google Workspace / Microsoft 365 / Okta…)
 - Devices: (MDM, Mac/Windows mix, how many)
@@ -16,16 +33,72 @@ const PROFILE_TEMPLATE = `- Identity & email: (Google Workspace / Microsoft 365 
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
-function SaveButton({ state, disabled, onClick, label = 'Save' }: { state: SaveState; disabled: boolean; onClick: () => void; label?: string }) {
+const inputClass =
+  'w-full rounded-xl bg-white px-3.5 py-2.5 text-sm leading-relaxed outline-none ring-1 ring-zinc-200 transition focus:ring-2 focus:ring-accent/40 dark:bg-zinc-950 dark:ring-zinc-800';
+
+function PrimaryButton({ children, className, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
-      onClick={onClick}
-      disabled={disabled || state === 'saving'}
-      className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-white dark:text-zinc-900"
+      {...props}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100',
+        className,
+      )}
     >
+      {children}
+    </button>
+  );
+}
+
+function SecondaryButton({ children, className, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      {...props}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-lg bg-white px-3.5 py-2 text-sm font-medium text-zinc-700 shadow-sm ring-1 ring-zinc-200 transition hover:ring-zinc-300 disabled:opacity-50 dark:bg-zinc-900 dark:text-zinc-200 dark:ring-zinc-800 dark:hover:ring-zinc-700',
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SaveButton({ state, disabled, onClick, label = 'Save' }: { state: SaveState; disabled: boolean; onClick: () => void; label?: string }) {
+  return (
+    <PrimaryButton onClick={onClick} disabled={disabled || state === 'saving'}>
       {state === 'saving' ? <Loader2 className="size-4 animate-spin" /> : state === 'saved' ? <Check className="size-4" /> : null}
       {state === 'saved' ? 'Saved' : label}
-    </button>
+    </PrimaryButton>
+  );
+}
+
+/** A settings card: icon, title, one-line description, then the controls. */
+function Section({
+  icon,
+  title,
+  description,
+  action,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: React.ReactNode;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-zinc-200/90 sm:p-6 dark:bg-zinc-900/60 dark:ring-zinc-800">
+      <div className="mb-4 flex items-start gap-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-accent/10 text-accent">{icon}</span>
+        <div className="min-w-0 flex-1">
+          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">{title}</h2>
+          <p className="mt-0.5 text-sm text-zinc-500">{description}</p>
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -63,103 +136,89 @@ export function SettingsForm({
       setValue(data.about);
       setSaved(data.about);
       setState('saved');
+      toast.success('Saved');
       setTimeout(() => setState('idle'), 2000);
-    } catch {
+    } catch (e) {
       setState('error');
+      toast.error("Couldn't save", { description: e instanceof Error ? e.message : undefined });
     }
   }
 
   return (
     <div className="scroll-thin flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-3xl space-y-12 px-4 py-10 pl-14 md:pl-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+      <div className="mx-auto max-w-3xl space-y-5 px-4 py-10 pl-14 md:px-6">
+        <div className="mb-2">
+          <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+          <p className="mt-1 text-sm text-zinc-500">How IT Desk knows you, your clients, and where your data is kept safe.</p>
+        </div>
 
-        <section className="space-y-3">
-          <div>
-            <h2 className="font-semibold">About you</h2>
-            <p className="text-sm text-zinc-500">Sent with every chat, whichever client it is for.</p>
-          </div>
-          <textarea
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            rows={4}
-            className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm leading-relaxed outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          <div className="flex items-center gap-2">
+        <Section icon={<UserRound className="size-[18px]" />} title="About you" description="Sent with every chat, whichever client it's for.">
+          <textarea value={value} onChange={(e) => setValue(e.target.value)} rows={4} className={inputClass} />
+          <div className="mt-3 flex items-center gap-2">
             <SaveButton state={state} disabled={value === saved} onClick={saveAbout} />
             <button
               onClick={() => setValue(defaultAbout)}
-              className="rounded-lg px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="rounded-lg px-3 py-2 text-sm text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
             >
               Reset to default
             </button>
-            {state === 'error' && <span className="text-sm text-red-600">Could not save.</span>}
           </div>
-        </section>
+        </Section>
 
-        <section className="space-y-4">
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <h2 className="font-semibold">Environments</h2>
-              <p className="text-sm text-zinc-500">
-                One per client. Answers use that client&apos;s stack, but past problems from every environment are still
-                matched, so a fix from one client can help another.
-              </p>
-            </div>
-            {!adding && (
-              <button
-                onClick={() => setAdding(true)}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
-              >
+        <Section
+          icon={<Building2 className="size-[18px]" />}
+          title="Environments"
+          description="One per client. Answers use that client's stack, and past problems from every client are still matched."
+          action={
+            !adding && (
+              <SecondaryButton onClick={() => setAdding(true)} className="shrink-0">
                 <Plus className="size-4" /> Add
-              </button>
+              </SecondaryButton>
+            )
+          }
+        >
+          <div className="space-y-3">
+            {adding && (
+              <EnvironmentCard
+                key="new"
+                initial={{ id: '', name: '', profile: PROFILE_TEMPLATE }}
+                problemCount={0}
+                onDone={() => {
+                  setAdding(false);
+                  router.refresh();
+                }}
+                onCancel={() => setAdding(false)}
+              />
             )}
+            {environments.map((e) => (
+              <EnvironmentCard key={e.id} initial={e} problemCount={e.problemCount} onDone={() => router.refresh()} />
+            ))}
+            {environments.length === 0 && !adding && <p className="text-sm text-zinc-500">No environments yet.</p>}
           </div>
-
-          {adding && (
-            <EnvironmentCard
-              key="new"
-              initial={{ id: '', name: '', profile: PROFILE_TEMPLATE }}
-              problemCount={0}
-              onDone={() => {
-                setAdding(false);
-                router.refresh();
-              }}
-              onCancel={() => setAdding(false)}
-            />
-          )}
-          {environments.map((e) => (
-            <EnvironmentCard key={e.id} initial={e} problemCount={e.problemCount} onDone={() => router.refresh()} />
-          ))}
-          {environments.length === 0 && !adding && <p className="text-sm text-zinc-500">No environments yet.</p>}
-        </section>
+        </Section>
 
         <DesktopAppSection rememberDays={rememberDays} />
 
         <BackupSection initial={backup} keepDays={backupKeepDays} />
 
-        <section className="space-y-3">
-          <h2 className="font-semibold">AI</h2>
-          <div className="divide-y divide-zinc-100 rounded-xl border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-700">
-            <Row
+        <Section icon={<Sparkles className="size-[18px]" />} title="AI" description="Keys and models live in the server's .env file.">
+          <div className="divide-y divide-zinc-100 overflow-hidden rounded-xl ring-1 ring-zinc-200/90 dark:divide-zinc-800 dark:ring-zinc-800">
+            <StatusRow
               ok={ai.gemini}
               name="Gemini"
               detail={
                 ai.gemini
-                  ? `Answers: ${ai.geminiModel} · Research: ${researchModel} · Titles, summaries & commands: ${fastModel}`
+                  ? `Answers ${ai.geminiModel} · research ${researchModel} · titles, summaries and commands ${fastModel}`
                   : 'Set GEMINI_API_KEY in .env and restart the container.'
               }
             />
-            <Row
+            <StatusRow
               ok={ai.claude}
-              name="Claude (Think harder)"
-              detail={ai.claude ? ai.claudeModel : 'Optional. Set ANTHROPIC_API_KEY in .env to enable the Think harder button.'}
+              name="Claude · Think harder"
+              detail={ai.claude ? ai.claudeModel : 'Optional. Set ANTHROPIC_API_KEY in .env to turn on the Think harder button.'}
             />
           </div>
-          <p className="text-xs text-zinc-500">
-            Models and keys live in the server&apos;s .env file. &quot;Remember me&quot; lasts {rememberDays} days from your last visit.
-          </p>
-        </section>
+        </Section>
       </div>
     </div>
   );
@@ -181,25 +240,25 @@ function EnvironmentCard({
   const [profile, setProfile] = useState(initial.profile);
   const [saved, setSaved] = useState({ name: initial.name, profile: initial.profile });
   const [state, setState] = useState<SaveState>('idle');
-  const [error, setError] = useState<string | null>(null);
   const dirty = name !== saved.name || profile !== saved.profile;
 
   async function save() {
     setState('saving');
-    setError(null);
     try {
       if (isNew) {
         await api('/api/environments', { method: 'POST', json: { name, profile } });
+        toast.success(`Added ${name}`);
       } else {
         await api(`/api/environments/${initial.id}`, { method: 'PATCH', json: { name, profile } });
         setSaved({ name, profile });
+        toast.success(`Saved ${name}`);
       }
       setState('saved');
       setTimeout(() => setState('idle'), 1500);
       onDone();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save.');
       setState('error');
+      toast.error("Couldn't save", { description: e instanceof Error ? e.message : undefined });
     }
   }
 
@@ -210,47 +269,50 @@ function EnvironmentCard({
     if (!window.confirm(warning)) return;
     try {
       await api(`/api/environments/${initial.id}`, { method: 'DELETE' });
+      toast(`Deleted ${initial.name}`);
       onDone();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not delete.');
+      toast.error("Couldn't delete", { description: e instanceof Error ? e.message : undefined });
     }
   }
 
   return (
-    <div className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
-      <div className="flex items-center gap-2">
-        <Building2 className="size-4 shrink-0 text-zinc-500" />
+    <div className={cn('rounded-xl p-4 ring-1', isNew ? 'bg-accent/[0.04] ring-accent/25' : 'bg-zinc-50/60 ring-zinc-200/80 dark:bg-zinc-950/40 dark:ring-zinc-800')}>
+      <div className="mb-2.5 flex items-center gap-2">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Client name"
           autoFocus={isNew}
-          className="min-w-0 flex-1 rounded-md bg-transparent px-1 py-0.5 font-medium outline-none focus:bg-zinc-100 dark:focus:bg-zinc-800"
+          className="min-w-0 flex-1 rounded-lg bg-transparent px-1.5 py-1 font-semibold outline-none transition focus:bg-white focus:ring-2 focus:ring-accent/40 dark:focus:bg-zinc-900"
         />
-        {!isNew && <span className="shrink-0 text-xs text-zinc-500">{problemCount} chat{problemCount === 1 ? '' : 's'}</span>}
+        {!isNew && (
+          <span className="shrink-0 rounded-full bg-zinc-200/70 px-2 py-0.5 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+            {problemCount} chat{problemCount === 1 ? '' : 's'}
+          </span>
+        )}
       </div>
       <textarea
         value={profile}
         onChange={(e) => setProfile(e.target.value)}
         rows={6}
         placeholder="Tools, plans and policies this client runs"
-        className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-sm leading-relaxed outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900"
+        className={cn(inputClass, 'font-mono text-[13px]')}
       />
-      <div className="flex items-center gap-2">
+      <div className="mt-3 flex items-center gap-2">
         <SaveButton state={state} disabled={!name.trim() || (!isNew && !dirty)} onClick={save} label={isNew ? 'Add environment' : 'Save'} />
         {isNew ? (
-          <button onClick={onCancel} className="rounded-lg px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">
+          <button onClick={onCancel} className="rounded-lg px-3 py-2 text-sm text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">
             Cancel
           </button>
         ) : (
           <button
             onClick={remove}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-zinc-500 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
           >
             <Trash2 className="size-4" /> Delete
           </button>
         )}
-        {error && <span className="text-sm text-red-600">{error}</span>}
       </div>
     </div>
   );
@@ -259,35 +321,33 @@ function EnvironmentCard({
 function DesktopAppSection({ rememberDays }: { rememberDays: number }) {
   const { canInstall, installed, install } = useInstallPrompt();
   return (
-    <section className="space-y-3">
-      <div>
-        <h2 className="font-semibold">Desktop app</h2>
-        <p className="text-sm text-zinc-500">
-          Install IT Desk on this computer for its own window, Start menu entry and taskbar icon. Everything still lives
-          on your server, so your history is the same on every device.
-        </p>
-      </div>
+    <Section
+      icon={<AppWindow className="size-[18px]" />}
+      title="Desktop app"
+      description="Its own window, Start menu entry and taskbar icon. History stays on your server, so it's the same everywhere."
+    >
       {installed ? (
-        <p className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400">
-          <CheckCircle2 className="size-4" /> You&apos;re using the installed app.
+        <p className="inline-flex items-center gap-2 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-700 dark:text-emerald-300">
+          <CheckCircle2 className="size-4" /> You&apos;re using the installed app
         </p>
       ) : canInstall ? (
-        <button
-          onClick={() => void install()}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-900"
-        >
+        <PrimaryButton onClick={() => void install()}>
           <Download className="size-4" /> Install IT Desk
-        </button>
+        </PrimaryButton>
       ) : (
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          In <span className="font-medium">Edge</span>: ⋯ menu → Apps → Install this site as an app. In{' '}
-          <span className="font-medium">Chrome</span>: the install icon at the right of the address bar.
-        </p>
+        <ol className="space-y-1.5 text-sm text-zinc-600 dark:text-zinc-400">
+          <li>
+            <span className="font-medium text-zinc-800 dark:text-zinc-200">Edge:</span> ⋯ menu → Apps → Install this site as an app
+          </li>
+          <li>
+            <span className="font-medium text-zinc-800 dark:text-zinc-200">Chrome:</span> the install icon at the right of the address bar
+          </li>
+        </ol>
       )}
-      <p className="text-xs text-zinc-500">
+      <p className="mt-3 text-xs text-zinc-500">
         Tick &quot;Remember me&quot; when you sign in and the app stays signed in for {rememberDays} days after each use.
       </p>
-    </section>
+    </Section>
   );
 }
 
@@ -300,17 +360,37 @@ function formatBytes(bytes: number): string {
 function BackupSection({ initial, keepDays }: { initial: BackupStatus; keepDays: number }) {
   const [status, setStatus] = useState(initial);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [checks, setChecks] = useState<ConnectionCheck[] | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
 
   async function backupNow() {
     setBusy(true);
-    setError(null);
+    setRequestError(null);
     try {
-      setStatus(await api<BackupStatus>('/api/backup', { method: 'POST' }));
+      const next = await api<BackupStatus>('/api/backup', { method: 'POST' });
+      setStatus(next);
+      const failed = next.lastError && (next.lastErrorAt ?? 0) > (next.lastAt ?? 0);
+      if (failed) toast.error('Backup failed', { description: explainError(next.lastError!, 'backup').title });
+      else toast.success('Backed up to R2');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Backup failed.');
+      setRequestError(e instanceof Error ? e.message : 'Backup failed.');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function test() {
+    setTesting(true);
+    setChecks(null);
+    setRequestError(null);
+    try {
+      const { checks: results } = await api<{ checks: ConnectionCheck[] }>('/api/backup/test', { method: 'POST' });
+      setChecks(results);
+    } catch (e) {
+      setRequestError(e instanceof Error ? e.message : 'Connection test failed.');
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -318,35 +398,32 @@ function BackupSection({ initial, keepDays }: { initial: BackupStatus; keepDays:
   const failing = Boolean(status.lastError && (!status.lastAt || (status.lastErrorAt ?? 0) > status.lastAt));
 
   return (
-    <section className="space-y-3">
-      <div>
-        <h2 className="font-semibold">Backups</h2>
-        <p className="text-sm text-zinc-500">
-          Once a day the database and screenshots are copied to your Cloudflare R2 bucket. Snapshots are kept for {keepDays}{' '}
-          days.
-        </p>
-      </div>
+    <Section
+      icon={<CloudUpload className="size-[18px]" />}
+      title="Backups"
+      description={`Once a day the database and screenshots are copied to your Cloudflare R2 bucket. Snapshots are kept for ${keepDays} days.`}
+    >
       {!status.configured ? (
-        <div className="flex items-start gap-3 rounded-xl border border-zinc-200 px-4 py-3 text-sm dark:border-zinc-700">
+        <div className="flex items-start gap-3 rounded-xl bg-zinc-50 px-4 py-3 text-sm ring-1 ring-zinc-200/80 dark:bg-zinc-950/40 dark:ring-zinc-800">
           <XCircle className="mt-0.5 size-4 shrink-0 text-zinc-400" />
           <p className="text-zinc-600 dark:text-zinc-400">
-            Not set up. Add R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET to the server&apos;s .env and
-            restart the container.
+            <HintText text="Not set up yet. Add R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET to the server .env, then run `docker compose up -d`." />
           </p>
         </div>
       ) : (
-        <div className="space-y-3 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
-          <div className="flex items-start gap-3 text-sm">
-            {failing ? (
-              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-600" />
-            ) : status.lastAt ? (
-              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />
-            ) : (
-              <CloudUpload className="mt-0.5 size-4 shrink-0 text-zinc-400" />
-            )}
-            <div className="min-w-0">
-              <p className="font-medium">
-                {status.lastAt ? (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 rounded-xl bg-zinc-50 px-4 py-3 ring-1 ring-zinc-200/80 dark:bg-zinc-950/40 dark:ring-zinc-800">
+            <span
+              className={cn(
+                'flex size-8 shrink-0 items-center justify-center rounded-full',
+                failing ? 'bg-red-500/10 text-red-600' : status.lastAt ? 'bg-emerald-500/10 text-emerald-600' : 'bg-zinc-200 text-zinc-500 dark:bg-zinc-800',
+              )}
+            >
+              {failing ? <XCircle className="size-4" /> : status.lastAt ? <CheckCircle2 className="size-4" /> : <CloudUpload className="size-4" />}
+            </span>
+            <div className="min-w-0 flex-1 text-sm">
+              <p className="font-medium text-zinc-900 dark:text-zinc-100">
+                {failing ? 'Last backup attempt failed' : status.lastAt ? (
                   <>
                     Last backup <span suppressHydrationWarning>{shortDate(status.lastAt)}</span>
                     {status.lastSize ? ` · ${formatBytes(status.lastSize)}` : ''}
@@ -355,33 +432,76 @@ function BackupSection({ initial, keepDays }: { initial: BackupStatus; keepDays:
                   'No backup yet'
                 )}
               </p>
-              <p className="break-words text-zinc-500">Bucket: {status.bucket}</p>
-              {failing && <p className="mt-1 break-words text-red-600 dark:text-red-400">Last attempt failed: {status.lastError}</p>}
+              <p className="truncate text-zinc-500">Bucket {status.bucket}</p>
             </div>
           </div>
-          <button
-            onClick={backupNow}
-            disabled={busy || status.running}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
-          >
-            {busy || status.running ? <Loader2 className="size-4 animate-spin" /> : <CloudUpload className="size-4" />}
-            {busy || status.running ? 'Backing up…' : 'Back up now'}
-          </button>
-          {error && <p className="text-sm text-red-600">{error}</p>}
+
+          {failing && status.lastError && <ErrorNotice error={status.lastError} context="backup" />}
+
+          <div className="flex flex-wrap gap-2">
+            <PrimaryButton onClick={backupNow} disabled={busy || status.running}>
+              {busy || status.running ? <Loader2 className="size-4 animate-spin" /> : <CloudUpload className="size-4" />}
+              {busy || status.running ? 'Backing up…' : 'Back up now'}
+            </PrimaryButton>
+            <SecondaryButton onClick={test} disabled={testing}>
+              {testing ? <Loader2 className="size-4 animate-spin" /> : <Plug className="size-4" />} Test connection
+            </SecondaryButton>
+          </div>
+
+          {checks && <ConnectionChecks checks={checks} />}
         </div>
       )}
-    </section>
+      {requestError && <ErrorNotice error={requestError} context="backup" className="mt-4" />}
+    </Section>
   );
 }
 
-function Row({ ok, name, detail }: { ok: boolean; name: string; detail: string }) {
+/** The R2 test as a checklist: which stage passed, and where it stopped and why. */
+function ConnectionChecks({ checks }: { checks: ConnectionCheck[] }) {
+  const passed = checks.every((c) => c.ok) && checks.length === 5;
   return (
-    <div className="flex items-start gap-3 px-4 py-3">
-      {ok ? (
-        <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />
-      ) : (
-        <XCircle className="mt-0.5 size-4 shrink-0 text-zinc-400" />
-      )}
+    <div className="animate-fade-up overflow-hidden rounded-xl ring-1 ring-zinc-200/90 dark:ring-zinc-800">
+      <p
+        className={cn(
+          'px-4 py-2.5 text-sm font-semibold',
+          passed ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-300' : 'bg-red-500/10 text-red-800 dark:text-red-300',
+        )}
+      >
+        {passed ? 'Everything checks out. Backups will work.' : 'Found the problem. Details below.'}
+      </p>
+      <ol className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        {checks.map((c) => (
+          <li key={c.step} className="flex gap-3 px-4 py-3 text-sm">
+            <span
+              className={cn(
+                'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-white',
+                c.ok ? 'bg-emerald-500' : 'bg-red-500',
+              )}
+            >
+              {c.ok ? <Check className="size-3" strokeWidth={3} /> : <XCircle className="size-3" strokeWidth={3} />}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-zinc-900 dark:text-zinc-100">
+                {c.step} <span className="font-normal text-zinc-500">· {c.detail}</span>
+              </p>
+              {c.hint && (
+                <p className={cn('mt-1 leading-relaxed', c.ok ? 'text-amber-700 dark:text-amber-400' : 'text-zinc-600 dark:text-zinc-400')}>
+                  <HintText text={c.hint} />
+                </p>
+              )}
+              {c.raw && <ErrorDetails raw={c.raw} code={explainError(c.raw, 'backup').code} className="mt-1.5 text-zinc-500" />}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function StatusRow({ ok, name, detail }: { ok: boolean; name: string; detail: string }) {
+  return (
+    <div className="flex items-start gap-3 bg-white px-4 py-3 dark:bg-transparent">
+      {ok ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-500" /> : <XCircle className="mt-0.5 size-4 shrink-0 text-zinc-300 dark:text-zinc-600" />}
       <div className="min-w-0">
         <p className="text-sm font-medium">{name}</p>
         <p className="break-words text-sm text-zinc-500">{detail}</p>

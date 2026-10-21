@@ -135,6 +135,17 @@ export interface SavedCommand {
   uses: CommandUse[];
 }
 
+/** One stage of the R2 connection test. */
+export interface ConnectionCheck {
+  step: string;
+  ok: boolean;
+  detail: string;
+  /** What to check, in plain language. */
+  hint: string | null;
+  /** The underlying error, kept for debugging. */
+  raw: string | null;
+}
+
 /** Off-site backup state shown in Settings. */
 export interface BackupStatus {
   configured: boolean;

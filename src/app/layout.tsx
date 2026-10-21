@@ -1,7 +1,10 @@
+import { GeistMono } from 'geist/font/mono';
+import { GeistSans } from 'geist/font/sans';
 import type { Metadata, Viewport } from 'next';
 
 import { PwaSetup } from '@/components/pwa';
 import { ThemeProvider } from '@/components/theme-provider';
+import { Toaster } from '@/components/toaster';
 
 import './globals.css';
 
@@ -23,10 +26,11 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`} suppressHydrationWarning>
       <body>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           {children}
+          <Toaster />
         </ThemeProvider>
         <PwaSetup />
       </body>

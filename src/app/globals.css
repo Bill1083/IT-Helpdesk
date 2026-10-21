@@ -2,12 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Design tokens: change the accent here and it follows everywhere. */
 :root {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --accent: 79 70 229; /* indigo-600 */
+  --accent-fg: 255 255 255;
+  --sidebar: 249 249 250;
   color-scheme: light;
 }
 
 .dark {
+  --accent: 129 140 248; /* indigo-400 */
+  --accent-fg: 16 14 36;
+  --sidebar: 17 17 19;
   color-scheme: dark;
 }
 
@@ -17,24 +23,54 @@ body {
 }
 
 body {
-  @apply bg-white text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+  @apply bg-white font-sans text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+}
+
+::selection {
+  background: rgb(var(--accent) / 0.22);
+}
+
+/* Keyboard focus is always visible, in the accent colour. */
+:where(button, a, [role='option'], summary):focus-visible {
+  outline: 2px solid rgb(var(--accent) / 0.75);
+  outline-offset: 2px;
+  border-radius: 0.5rem;
 }
 
 /* Thin, unobtrusive scrollbars like the chat apps. */
 .scroll-thin {
   scrollbar-width: thin;
-  scrollbar-color: rgb(161 161 170 / 0.4) transparent;
+  scrollbar-color: rgb(161 161 170 / 0.35) transparent;
 }
 
+/* Skeleton shimmer for answers that are on their way. */
+.skeleton {
+  @apply rounded-md bg-zinc-200/70 dark:bg-zinc-800/80;
+  background-image: linear-gradient(90deg, transparent 0, rgb(255 255 255 / 0.55) 50%, transparent 100%);
+  background-size: 480px 100%;
+  background-repeat: no-repeat;
+  animation: shimmer 1.6s linear infinite;
+}
+.dark .skeleton {
+  background-image: linear-gradient(90deg, transparent 0, rgb(255 255 255 / 0.06) 50%, transparent 100%);
+}
+
+/* Answer text. */
 .step-prose {
-  @apply prose prose-zinc max-w-none dark:prose-invert;
-  @apply prose-headings:font-semibold prose-h3:mb-2 prose-h3:mt-0 prose-h3:text-base;
-  @apply prose-p:my-2 prose-ol:my-2 prose-ul:my-2 prose-li:my-0.5;
-  @apply prose-code:rounded prose-code:bg-zinc-100 prose-code:px-1 prose-code:py-0.5 prose-code:font-normal prose-code:before:content-none prose-code:after:content-none dark:prose-code:bg-zinc-800;
-  @apply prose-pre:my-2 prose-pre:rounded-lg prose-pre:bg-zinc-900 prose-pre:px-4 prose-pre:py-3 prose-pre:text-[13px] prose-pre:leading-relaxed prose-pre:text-zinc-100 dark:prose-pre:bg-zinc-800;
-  @apply prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline dark:prose-a:text-blue-400;
+  @apply prose prose-zinc max-w-none text-[15px] leading-7 dark:prose-invert;
+  @apply prose-headings:font-semibold prose-headings:tracking-tight prose-h3:mb-2 prose-h3:mt-5 prose-h3:text-[15.5px];
+  @apply prose-p:my-2.5 prose-ol:my-2.5 prose-ul:my-2.5 prose-li:my-1 prose-li:marker:text-zinc-400;
+  @apply prose-strong:font-semibold prose-strong:text-zinc-900 dark:prose-strong:text-zinc-50;
+  @apply prose-code:rounded-md prose-code:border prose-code:border-zinc-200 prose-code:bg-zinc-50 prose-code:px-1.5 prose-code:py-0.5 prose-code:text-[0.86em] prose-code:font-medium prose-code:before:content-none prose-code:after:content-none dark:prose-code:border-zinc-800 dark:prose-code:bg-zinc-900;
+  @apply prose-pre:m-0 prose-pre:rounded-none prose-pre:bg-transparent prose-pre:p-0;
+  @apply prose-a:font-medium prose-a:text-accent prose-a:no-underline hover:prose-a:underline;
+  @apply prose-table:my-0 prose-th:px-3 prose-th:py-2 prose-td:px-3 prose-td:py-2;
+}
+
+.step-prose > :first-child {
+  margin-top: 0;
 }
 
 .step-prose pre code {
-  @apply bg-transparent p-0;
+  @apply border-0 bg-transparent p-0 font-normal;
 }

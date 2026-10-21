@@ -1,6 +1,6 @@
 import { NewProblem } from '@/components/new-problem';
 import { env } from '@/lib/env';
-import { getSetting, listEnvironments, reporters } from '@/lib/repo';
+import { getSetting, listEnvironments, listProblems, reporters } from '@/lib/repo';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +14,9 @@ export default function HomePage() {
       aiReady={Boolean(env.geminiApiKey)}
       environments={environments}
       defaultEnvironmentId={defaultEnvironmentId}
+      recentOpen={listProblems({ limit: 50 })
+        .filter((p) => p.status === 'open')
+        .slice(0, 3)}
     />
   );
 }

@@ -1,12 +1,27 @@
 'use client';
 
-import { Building2, CheckCircle2, ChevronDown, LogOut, Monitor, Moon, Plus, Search, Settings, Sun, Terminal, Wrench, X } from 'lucide-react';
+import {
+  Building2,
+  CheckCircle2,
+  ChevronDown,
+  LogOut,
+  Monitor,
+  Moon,
+  PanelLeftClose,
+  Plus,
+  Search,
+  Settings,
+  Sun,
+  Terminal,
+  X,
+} from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Dropdown } from '@/components/dropdown';
+import { Logo } from '@/components/logo';
 import { MODE_ICONS } from '@/components/mode-icon';
 import { PROBLEMS_CHANGED, api, cn, shortDate } from '@/lib/client';
 import type { ProblemListItem } from '@/lib/types';
@@ -19,7 +34,16 @@ export interface EnvironmentOption {
 const RESOLVED_SHOWN = 40;
 const FILTER_KEY = 'ithd.environmentFilter';
 
-export function Sidebar({ initialProblems, environments }: { initialProblems: ProblemListItem[]; environments: EnvironmentOption[] }) {
+export function Sidebar({
+  initialProblems,
+  environments,
+  onCollapse,
+}: {
+  initialProblems: ProblemListItem[];
+  environments: EnvironmentOption[];
+  /** Desktop only: hide the sidebar down to the slim rail. */
+  onCollapse?: () => void;
+}) {
   const [problems, setProblems] = useState(initialProblems);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
@@ -88,29 +112,33 @@ export function Sidebar({ initialProblems, environments }: { initialProblems: Pr
 
   return (
     <div className="flex min-h-0 w-full flex-col">
-      <div className="flex items-center gap-2 px-4 pb-2 pt-4">
-        <div className="flex size-7 items-center justify-center rounded-lg bg-zinc-900 text-white dark:bg-white dark:text-zinc-900">
-          <Wrench className="size-4" />
-        </div>
-        <span className="font-semibold tracking-tight">IT Desk</span>
+      <div className="flex items-center gap-2.5 px-4 pb-3 pt-4">
+        <Logo size="sm" />
+        <span className="text-[15px] font-semibold tracking-tight">IT Desk</span>
+        <span className="flex-1" />
+        {onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            aria-label="Hide sidebar (Ctrl+B)"
+            title="Hide sidebar (Ctrl+B)"
+            className="rounded-lg p-1.5 text-zinc-400 transition hover:bg-zinc-200/70 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+          >
+            <PanelLeftClose className="size-4" />
+          </button>
+        )}
       </div>
 
       <div className="space-y-1 px-3 pb-3">
         <Link
           href="/"
-          className="mb-1 flex w-full items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium shadow-sm transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+          className="mb-2 flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-3 py-2.5 text-sm font-semibold text-accent-fg shadow-sm transition hover:brightness-110 active:scale-[0.99]"
         >
-          <Plus className="size-4" /> New chat
+          <Plus className="size-4" strokeWidth={2.5} /> New chat
         </Link>
-        <Link
-          href="/commands"
-          className={cn(
-            'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition hover:bg-zinc-200/60 dark:hover:bg-zinc-800',
-            pathname === '/commands' && 'bg-zinc-200/80 dark:bg-zinc-800',
-          )}
-        >
-          <Terminal className="size-4" /> Useful commands
-        </Link>
+        <NavLink href="/commands" active={pathname === '/commands'} icon={<Terminal className="size-4" />}>
+          Useful commands
+        </NavLink>
         {environments.length > 0 && (
           <Dropdown
             label="Filter by environment"
@@ -122,39 +150,45 @@ export function Sidebar({ initialProblems, environments }: { initialProblems: Pr
               { value: 'none', label: 'No environment' },
             ]}
             wrapperClassName="w-full"
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-200/60 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-zinc-600 transition hover:bg-zinc-200/60 dark:text-zinc-300 dark:hover:bg-zinc-800/70"
             renderTrigger={(selected) => (
               <>
-                <Building2 className="size-4 shrink-0" />
+                <Building2 className="size-4 shrink-0 text-zinc-400" />
                 <span className="min-w-0 flex-1 truncate text-left">{selected?.label ?? 'All environments'}</span>
-                <ChevronDown className="size-4 shrink-0 text-zinc-400" />
+                <ChevronDown className="size-3.5 shrink-0 text-zinc-400" />
               </>
             )}
           />
         )}
-        <div className="relative pt-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 mt-0.5 size-4 -translate-y-1/2 text-zinc-400" />
+        <div className="relative pt-1.5">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 mt-[3px] size-4 -translate-y-1/2 text-zinc-400" />
           <input
+            id="sidebar-search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search everything, people…"
-            className="w-full rounded-lg bg-zinc-200/60 py-2 pl-8 pr-8 text-sm outline-none placeholder:text-zinc-500 focus:bg-white focus:ring-1 focus:ring-zinc-300 dark:bg-zinc-800 dark:focus:bg-zinc-800 dark:focus:ring-zinc-600"
+            onKeyDown={(e) => e.key === 'Escape' && setQuery('')}
+            placeholder="Search"
+            className="w-full rounded-lg border border-transparent bg-zinc-200/50 py-2 pl-8 pr-14 text-sm outline-none transition placeholder:text-zinc-500 focus:border-zinc-300 focus:bg-white dark:bg-zinc-800/60 dark:focus:border-zinc-700 dark:focus:bg-zinc-900"
           />
-          {query && (
+          {query ? (
             <button
               aria-label="Clear search"
               onClick={() => setQuery('')}
-              className="absolute right-2 top-1/2 mt-0.5 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
+              className="absolute right-2 top-1/2 mt-[3px] -translate-y-1/2 rounded p-0.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
             >
               <X className="size-4" />
             </button>
+          ) : (
+            <kbd className="pointer-events-none absolute right-2 top-1/2 mt-[3px] hidden -translate-y-1/2 rounded-md border border-zinc-300 bg-white px-1.5 font-sans text-[10px] font-medium text-zinc-400 md:block dark:border-zinc-700 dark:bg-zinc-900">
+              Ctrl K
+            </kbd>
           )}
         </div>
       </div>
 
       <nav className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         {open.length + resolved.length === 0 && (
-          <p className="px-3 py-6 text-center text-sm text-zinc-500">
+          <p className="px-3 py-8 text-center text-sm text-zinc-500">
             {query ? 'No matches.' : activeFilter === 'all' ? 'Nothing yet. Start a new chat.' : 'Nothing in this environment yet.'}
           </p>
         )}
@@ -162,12 +196,12 @@ export function Sidebar({ initialProblems, environments }: { initialProblems: Pr
         <Section title="Done" items={resolved} pathname={pathname} envNames={showEnvName ? envNames : null} />
       </nav>
 
-      <div className="flex items-center gap-1 border-t border-zinc-200 px-2 py-2 dark:border-zinc-800">
+      <div className="flex items-center gap-1 border-t border-zinc-200/80 px-2 py-2 dark:border-zinc-800/80">
         <Link
           href="/settings"
           className={cn(
-            'flex flex-1 items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-zinc-200/70 dark:hover:bg-zinc-800',
-            pathname === '/settings' && 'bg-zinc-200/70 dark:bg-zinc-800',
+            'flex flex-1 items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-zinc-600 transition hover:bg-zinc-200/60 dark:text-zinc-300 dark:hover:bg-zinc-800/70',
+            pathname === '/settings' && 'bg-zinc-200/70 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100',
           )}
         >
           <Settings className="size-4" /> Settings
@@ -177,12 +211,29 @@ export function Sidebar({ initialProblems, environments }: { initialProblems: Pr
           aria-label="Sign out"
           title="Sign out"
           onClick={signOut}
-          className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+          className="rounded-lg p-2 text-zinc-500 transition hover:bg-zinc-200/60 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
         >
           <LogOut className="size-4" />
         </button>
       </div>
     </div>
+  );
+}
+
+function NavLink({ href, active, icon, children }: { href: string; active: boolean; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition',
+        active
+          ? 'bg-zinc-200/70 font-medium text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
+          : 'text-zinc-600 hover:bg-zinc-200/60 dark:text-zinc-300 dark:hover:bg-zinc-800/70',
+      )}
+    >
+      <span className={active ? 'text-accent' : 'text-zinc-400'}>{icon}</span>
+      {children}
+    </Link>
   );
 }
 
@@ -199,39 +250,49 @@ function Section({
 }) {
   if (items.length === 0) return null;
   return (
-    <div className="mb-3">
-      <h3 className="px-3 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-zinc-500">{title}</h3>
+    <div className="mb-4">
+      <h3 className="flex items-center gap-1.5 px-2.5 pb-1.5 pt-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+        {title}
+        <span className="rounded-full bg-zinc-200/80 px-1.5 text-[10px] font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+          {items.length}
+        </span>
+      </h3>
       <ul className="space-y-0.5">
         {items.map((p) => {
           const active = pathname === `/p/${p.id}`;
-          const Icon = p.status === 'resolved' ? CheckCircle2 : MODE_ICONS[p.mode];
+          const done = p.status === 'resolved';
+          const Icon = done ? CheckCircle2 : MODE_ICONS[p.mode];
           const env = envNames && p.environmentId ? envNames.get(p.environmentId) : null;
           return (
             <li key={p.id}>
               <Link
                 href={`/p/${p.id}`}
                 className={cn(
-                  'group block rounded-lg px-3 py-2 transition',
-                  active ? 'bg-zinc-200/80 dark:bg-zinc-800' : 'hover:bg-zinc-200/50 dark:hover:bg-zinc-800/60',
+                  'group flex gap-2.5 rounded-lg px-2.5 py-2 transition',
+                  active
+                    ? 'bg-white shadow-sm ring-1 ring-zinc-200/90 dark:bg-zinc-800/90 dark:ring-zinc-700/70'
+                    : 'hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50',
                 )}
               >
-                <div className="flex items-center gap-1.5">
-                  <Icon
-                    className={cn(
-                      'size-3.5 shrink-0',
-                      p.status === 'resolved' ? 'text-emerald-600 dark:text-emerald-500' : 'text-zinc-400',
-                    )}
-                  />
-                  <span className="truncate text-sm">{p.title || p.description}</span>
-                </div>
-                <div className="mt-0.5 flex items-center gap-1 truncate pl-5 text-xs text-zinc-500">
-                  {env && <span className="truncate">{env}</span>}
-                  {env && <span>·</span>}
-                  {p.reporter && <span className="truncate">{p.reporter}</span>}
-                  {p.reporter && <span>·</span>}
-                  <time suppressHydrationWarning className="shrink-0">
-                    {shortDate(p.createdAt)}
-                  </time>
+                <Icon
+                  className={cn(
+                    'mt-0.5 size-4 shrink-0',
+                    done ? 'text-emerald-500' : active ? 'text-accent' : 'text-zinc-400 group-hover:text-zinc-500',
+                  )}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className={cn('truncate text-[13.5px] leading-5', active ? 'font-medium text-zinc-900 dark:text-zinc-50' : 'text-zinc-700 dark:text-zinc-300')}>
+                    {p.title || p.description}
+                  </p>
+                  <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-zinc-400">
+                    {env && <span className="truncate">{env}</span>}
+                    {env && <span>·</span>}
+                    {p.reporter && <span className="truncate">{p.reporter}</span>}
+                    {p.reporter && <span>·</span>}
+                    <time suppressHydrationWarning className="shrink-0">
+                      {shortDate(p.createdAt)}
+                    </time>
+                  </p>
                 </div>
               </Link>
             </li>
@@ -254,7 +315,7 @@ function ThemeButton() {
       aria-label={`Theme: ${current}`}
       title={`Theme: ${current}`}
       onClick={() => setTheme(order[(order.indexOf(current) + 1) % order.length])}
-      className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+      className="rounded-lg p-2 text-zinc-500 transition hover:bg-zinc-200/60 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
     >
       <Icon className="size-4" />
     </button>

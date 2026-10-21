@@ -104,7 +104,8 @@ than 30 days (`BACKUP_KEEP_DAYS`). No cron job is needed; the app runs it itself
 2. **R2 Object Storage → Manage API tokens → Create API token.**
    - Permissions: **Object Read & Write**
    - Specify bucket: **Apply to specific buckets only** → `it-desk-backups`
-   - TTL: **Forever**. Optionally limit Client IP to your VPS's IP.
+   - TTL: **Forever**. Optionally limit Client IP to your VPS's IP. If the server also has an IPv6 address
+     (`curl -6 ifconfig.me` answers), add that too, or R2 will refuse requests that go out over IPv6.
 3. Copy the **Access Key ID** and **Secret Access Key** (the secret is shown only once). Your **Account ID** is on
    the R2 overview page, and is also the first part of the S3 endpoint `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
 
@@ -121,8 +122,12 @@ R2_BUCKET=it-desk-backups
 cd /home/deploy/it-helpdesk && docker compose up -d
 ```
 
-Then open **Settings → Backups → Back up now**. The bucket should show `db/helpdesk-<date>.db.gz` and an `uploads/`
-folder. Settings shows the last backup time, and the error if one fails.
+Then open **Settings → Backups → Test connection**. It checks each stage in turn (settings, finding the server,
+the secure connection, signing in, writing) and says in plain language which one fails and what to change. When it
+is all green, click **Back up now**; the bucket should show `db/helpdesk-<date>.db.gz` and an `uploads/` folder.
+
+`R2_BUCKET` must match the bucket name exactly. Only buckets created with an EU jurisdiction need
+`R2_ENDPOINT=https://<ACCOUNT_ID>.eu.r2.cloudflarestorage.com` as well.
 
 **Restoring** (to a new VPS, or after a disaster):
 
