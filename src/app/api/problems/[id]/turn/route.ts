@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 
-import { describeError, streamTurn } from '@/lib/ai/engine';
+import { describeError, liveTurn, streamTurn } from '@/lib/ai/engine';
 import { jsonError, readBody } from '@/lib/http';
 import { getProblem } from '@/lib/repo';
 import { attachmentsSchema } from '@/lib/schemas';
@@ -29,6 +29,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { kind, content, attachments, regenerate, provider, search } = body.data;
   if ((kind === 'note' || kind === 'clarify') && !content.trim() && attachments.length === 0) {
     return jsonError('Write what happened first.');
+  }
+  // Refuse up front (rather than mid-stream) so the browser knows the message
+  // wasn't taken and gives the typed text back.
+  if (liveTurn(id)) {
+    return jsonError('Still writing the previous reply. Send this again once it appears.', 409);
   }
 
   const encoder = new TextEncoder();

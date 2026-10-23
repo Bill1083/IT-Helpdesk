@@ -129,6 +129,11 @@ const RULES: Rule[] = [
 
   // --- Anywhere ------------------------------------------------------------
   {
+    test: /Still writing the previous reply/i,
+    title: 'Still writing the last reply',
+    hint: 'Your message is back in the box. Send it again once the reply above finishes.',
+  },
+  {
     test: /Failed to fetch|NetworkError|Load failed|network error/i,
     title: "Can't reach IT Desk",
     hint: 'Check your internet connection. If other sites work, the server may be restarting; try again in a minute.',

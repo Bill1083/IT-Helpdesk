@@ -106,6 +106,11 @@ export function Thread({
     if (force || nearBottom) bottom.current?.scrollIntoView({ block: 'end' });
   }, []);
 
+  /**
+   * Sends a message and streams the reply. Resolves true once the server has
+   * accepted the message, even if the reply then fails (the message is saved
+   * and the error offers Retry), so the composer only restores text it lost.
+   */
   const runTurn = useCallback(
     async (request: TurnRequest): Promise<boolean> => {
       localTurn.current = true;
@@ -141,6 +146,7 @@ export function Thread({
       };
 
       let failed: string | null = null;
+      let accepted = false;
       try {
         const response = await fetch(`/api/problems/${id}/turn`, {
           method: 'POST',
@@ -152,6 +158,7 @@ export function Thread({
           if (response.status === 401) window.location.href = '/login';
           throw new Error(data.error ?? `Request failed (${response.status})`);
         }
+        accepted = true;
         for await (const event of readNdjson<StreamEvent>(response)) {
           switch (event.type) {
             case 'status':
@@ -187,7 +194,7 @@ export function Thread({
       if (failed) setError(failed);
       notifyProblemsChanged();
       requestAnimationFrame(() => scrollToBottom(true));
-      return !failed;
+      return accepted;
     },
     [id, refresh, scrollToBottom],
   );

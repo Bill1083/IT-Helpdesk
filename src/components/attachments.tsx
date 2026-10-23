@@ -60,6 +60,8 @@ export function useAttachments() {
     onDrop,
     remove: (name: string) => setAttachments((list) => list.filter((a) => a.name !== name)),
     clear: () => setAttachments([]),
+    /** Puts back attachments from a message that didn't send. */
+    restore: (list: Attachment[]) => setAttachments(list),
   };
 }
 

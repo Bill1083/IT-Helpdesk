@@ -73,12 +73,19 @@ export const ReplyComposer = forwardRef<
     const value: ComposerSubmit = resolving
       ? { kind: 'worked', content: text.trim(), attachments: files.attachments, search: false, outcome: fixing ? outcome : 'done' }
       : { kind: kind ?? (fixing ? 'clarify' : 'note'), content: text.trim(), attachments: files.attachments, search };
-    const ok = await onSubmit(value);
-    if (ok) {
-      setText('');
-      setKind(null);
-      setSearch(false);
-      files.clear();
+    const draft = { text, kind, search, attachments: files.attachments };
+    // Clear straight away so it feels sent (the message shows in the thread);
+    // put it back only if the server never accepted it.
+    setText('');
+    setKind(null);
+    setSearch(false);
+    files.clear();
+    const accepted = await onSubmit(value);
+    if (!accepted) {
+      setText(draft.text);
+      setKind(draft.kind);
+      setSearch(draft.search);
+      files.restore(draft.attachments);
     }
   }
 

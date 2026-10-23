@@ -35,7 +35,7 @@ export function ErrorDetails({ raw, code, className }: { raw: string; code: stri
         className="inline-flex items-center gap-1 text-xs font-medium opacity-75 hover:opacity-100"
       >
         <ChevronDown className={cn('size-3.5 transition', open && 'rotate-180')} />
-        {open ? 'Hide' : 'Show'} technical details
+        {open ? 'Hide' : 'Show'} details
         {code && <span className="rounded bg-black/5 px-1.5 py-px font-mono text-[11px] dark:bg-white/10">{code}</span>}
       </button>
       {open && (
