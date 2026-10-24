@@ -20,6 +20,10 @@ tries that fix first.
   server, so history is the same everywhere.
 - **Off-site backups.** A daily database snapshot and new screenshots go to a Cloudflare R2 bucket, with 30 days of
   history and status in Settings.
+- **Separate accounts.** The owner's password is `APP_PASSWORD` in `.env`; the owner can create extra accounts in
+  Settings → Accounts for other people, told apart only by password. Each account's chats, environments, commands
+  and "Seen before" matching are private to it. A new or reset password is temporary: the first sign-in asks that
+  person to choose their own before they can do anything else.
 
 ## How it stays fast
 

@@ -29,7 +29,7 @@ describe('backups', () => {
   it('snapshots the live database into a valid gzipped SQLite file', async () => {
     const repo = await import('@/lib/repo');
     const { snapshot } = await import('@/lib/backup');
-    repo.createEnvironment('Acme', '- Teams');
+    repo.createEnvironment(repo.OWNER_ID, 'Acme', '- Teams');
 
     const gz = await snapshot();
     const file = path.join(dir, 'restored.db');

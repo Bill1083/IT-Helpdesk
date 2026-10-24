@@ -34,6 +34,19 @@ export interface RelatedMatch {
   reason?: string;
 }
 
+/** A separate account, told apart only by its password. */
+export interface Account {
+  id: string;
+  name: string;
+  isOwner: boolean;
+  /** Signed in with a temporary password the owner gave them; must choose their own. */
+  mustChangePassword: boolean;
+  /** Bumped on password reset or delete, which signs that account out everywhere. */
+  sessionVersion: number;
+  createdAt: number;
+  lastLoginAt: number | null;
+}
+
 /** A client the admin contracts for, with its own stack description. */
 export interface Environment {
   id: string;
@@ -49,6 +62,7 @@ export interface EnvironmentSummary extends Environment {
 
 export interface Problem {
   id: string;
+  accountId: string;
   title: string | null;
   description: string;
   reporter: string | null;

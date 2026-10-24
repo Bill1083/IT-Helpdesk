@@ -17,6 +17,9 @@ export interface Session {
   issuedAt: number;
   expiresAt: number;
   remember: boolean;
+  accountId: string;
+  /** Must match the account's current version (a reset bumps it). */
+  version: number;
 }
 
 const encoder = new TextEncoder();
@@ -69,11 +72,14 @@ export async function createSessionToken(
   secret: string,
   remember: boolean,
   rememberDays: number,
+  account: { id: string; version: number },
   now = Date.now(),
 ): Promise<{ token: string; session: Session }> {
   const lifetime = remember ? rememberDays * 24 * 60 * 60 * 1000 : SHORT_SESSION_MS;
-  const session: Session = { issuedAt: now, expiresAt: now + lifetime, remember };
-  const payload = toBase64Url(JSON.stringify({ i: session.issuedAt, e: session.expiresAt, r: remember ? 1 : 0 }));
+  const session: Session = { issuedAt: now, expiresAt: now + lifetime, remember, accountId: account.id, version: account.version };
+  const payload = toBase64Url(
+    JSON.stringify({ i: session.issuedAt, e: session.expiresAt, r: remember ? 1 : 0, a: account.id, v: account.version }),
+  );
   return { token: `${payload}.${await hmac(secret, payload)}`, session };
 }
 
@@ -91,10 +97,17 @@ export async function verifySessionToken(
   const json = fromBase64Url(payload);
   if (!json) return null;
   try {
-    const data = JSON.parse(json) as { i?: unknown; e?: unknown; r?: unknown };
+    const data = JSON.parse(json) as { i?: unknown; e?: unknown; r?: unknown; a?: unknown; v?: unknown };
     if (typeof data.i !== 'number' || typeof data.e !== 'number') return null;
     if (data.e <= now) return null;
-    return { issuedAt: data.i, expiresAt: data.e, remember: data.r === 1 };
+    return {
+      issuedAt: data.i,
+      expiresAt: data.e,
+      remember: data.r === 1,
+      // Cookies from before accounts existed belong to the owner.
+      accountId: typeof data.a === 'string' ? data.a : 'owner',
+      version: typeof data.v === 'number' ? data.v : 1,
+    };
   } catch {
     return null;
   }

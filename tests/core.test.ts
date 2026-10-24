@@ -9,19 +9,21 @@ import { ftsQuery } from '@/lib/repo';
 const SECRET = 'test-secret';
 
 describe('session tokens', () => {
+  const ACCOUNT = { id: 'owner', version: 1 };
+
   it('round-trips a remembered session', async () => {
-    const { token } = await createSessionToken(SECRET, true, 30, 1_000);
+    const { token } = await createSessionToken(SECRET, true, 30, ACCOUNT, 1_000);
     const session = await verifySessionToken(SECRET, token, 2_000);
-    expect(session).toMatchObject({ remember: true, issuedAt: 1_000, expiresAt: 1_000 + 30 * 86_400_000 });
+    expect(session).toMatchObject({ remember: true, issuedAt: 1_000, expiresAt: 1_000 + 30 * 86_400_000, accountId: 'owner', version: 1 });
   });
 
   it('gives a short session without remember me', async () => {
-    const { session } = await createSessionToken(SECRET, false, 30, 0);
+    const { session } = await createSessionToken(SECRET, false, 30, ACCOUNT, 0);
     expect(session.expiresAt).toBe(12 * 3_600_000);
   });
 
   it('rejects tampered, expired and foreign tokens', async () => {
-    const { token } = await createSessionToken(SECRET, true, 30, 0);
+    const { token } = await createSessionToken(SECRET, true, 30, ACCOUNT, 0);
     const [payload, signature] = token.split('.');
     expect(await verifySessionToken(SECRET, `${payload}x.${signature}`, 1)).toBeNull();
     expect(await verifySessionToken(SECRET, token, 31 * 86_400_000)).toBeNull();

@@ -1,5 +1,5 @@
 import { liveTurn, similarFromMatches } from '@/lib/ai/engine';
-import { getMessages, getProblem } from '@/lib/repo';
+import { getMessages, getOwnedProblem } from '@/lib/repo';
 import type { Message, Problem, SimilarProblem } from '@/lib/types';
 
 export interface ProblemView {
@@ -10,8 +10,9 @@ export interface ProblemView {
   live: { text: string; status: string | null } | null;
 }
 
-export function problemView(id: string): ProblemView | null {
-  const problem = getProblem(id);
+/** Everything the chat page needs, only if the chat belongs to this account. */
+export function problemView(id: string, accountId: string): ProblemView | null {
+  const problem = getOwnedProblem(id, accountId);
   if (!problem) return null;
   return { problem, messages: getMessages(id), similar: similarFromMatches(problem.related), live: liveTurn(id) };
 }

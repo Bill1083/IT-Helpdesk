@@ -41,10 +41,12 @@ const TYPE_KEY = 'ithd.typeFilter';
 export function Sidebar({
   initialProblems,
   environments,
+  account,
   onCollapse,
 }: {
   initialProblems: ProblemListItem[];
   environments: EnvironmentOption[];
+  account: { name: string; isOwner: boolean };
   /** Desktop only: hide the sidebar down to the slim rail. */
   onCollapse?: () => void;
 }) {
@@ -215,7 +217,18 @@ export function Sidebar({
         <Section title="Done" items={resolved} pathname={pathname} envNames={showEnvName ? envNames : null} />
       </nav>
 
-      <div className="flex items-center gap-1 border-t border-zinc-200/80 px-2 py-2 dark:border-zinc-800/80">
+      <div className="flex items-center gap-2.5 border-t border-zinc-200/80 px-4 pb-1 pt-3 dark:border-zinc-800/80">
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-accent/15 text-[11px] font-semibold uppercase text-accent">
+          {account.name.trim().charAt(0) || '?'}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-zinc-700 dark:text-zinc-200">{account.name}</span>
+        {account.isOwner && (
+          <span className="shrink-0 rounded-full bg-zinc-200/80 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+            Owner
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-1 px-2 pb-2 pt-1">
         <Link
           href="/settings"
           className={cn(

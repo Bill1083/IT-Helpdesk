@@ -3,11 +3,14 @@ import { z } from 'zod';
 
 import { readBody } from '@/lib/http';
 import { createEnvironment, listEnvironments } from '@/lib/repo';
+import { requireAccount } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
-export function GET() {
-  return NextResponse.json({ environments: listEnvironments() });
+export async function GET() {
+  const auth = await requireAccount();
+  if ('response' in auth) return auth.response;
+  return NextResponse.json({ environments: listEnvironments(auth.account.id) });
 }
 
 const schema = z.object({
@@ -16,8 +19,10 @@ const schema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  const auth = await requireAccount();
+  if ('response' in auth) return auth.response;
   const body = await readBody(request, schema);
   if ('response' in body) return body.response;
-  const environment = createEnvironment(body.data.name, body.data.profile.trim());
+  const environment = createEnvironment(auth.account.id, body.data.name, body.data.profile.trim());
   return NextResponse.json({ environment }, { status: 201 });
 }

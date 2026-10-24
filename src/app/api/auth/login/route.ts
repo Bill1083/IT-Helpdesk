@@ -4,6 +4,9 @@ import { z } from 'zod';
 import { SESSION_COOKIE, createSessionToken, passwordMatches, sessionCookieOptions } from '@/lib/auth';
 import { env } from '@/lib/env';
 import { jsonError, readBody } from '@/lib/http';
+import { verifyPassword } from '@/lib/passwords';
+import { OWNER_ID, getAccount, passwordAccounts, recordLogin } from '@/lib/repo';
+import type { Account } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,9 +24,18 @@ function clientIp(request: NextRequest): string {
   return request.headers.get('x-real-ip') ?? request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
 }
 
+/** The password decides the account: the owner's lives in .env, the rest are hashed in the database. */
+async function accountFor(password: string): Promise<Account | null> {
+  const ownerPassword = env.appPassword;
+  if (ownerPassword && (await passwordMatches(env.sessionSecret, password, ownerPassword))) return getAccount(OWNER_ID);
+  for (const { account, hash } of passwordAccounts()) {
+    if (await verifyPassword(password, hash)) return account;
+  }
+  return null;
+}
+
 export async function POST(request: NextRequest) {
-  const expected = env.appPassword;
-  if (!expected) return jsonError('APP_PASSWORD is not set in .env on the server.', 500);
+  if (!env.appPassword) return jsonError('APP_PASSWORD is not set in .env on the server.', 500);
 
   const ip = clientIp(request);
   const record = failures.get(ip);
@@ -34,15 +46,20 @@ export async function POST(request: NextRequest) {
   const body = await readBody(request, schema);
   if ('response' in body) return body.response;
 
-  if (!(await passwordMatches(env.sessionSecret, body.data.password, expected))) {
+  const account = await accountFor(body.data.password);
+  if (!account) {
     const fresh = !record || Date.now() - record.since >= WINDOW_MS;
     failures.set(ip, { count: fresh ? 1 : record.count + 1, since: fresh ? Date.now() : record.since });
     await new Promise((resolve) => setTimeout(resolve, 600));
     return jsonError('Wrong password.', 401);
   }
   failures.delete(ip);
+  recordLogin(account.id);
 
-  const { token, session } = await createSessionToken(env.sessionSecret, body.data.remember, env.rememberDays);
+  const { token, session } = await createSessionToken(env.sessionSecret, body.data.remember, env.rememberDays, {
+    id: account.id,
+    version: account.sessionVersion,
+  });
   const response = NextResponse.json({ ok: true });
   const https = request.headers.get('x-forwarded-proto') === 'https' || request.nextUrl.protocol === 'https:';
   response.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(session, https));

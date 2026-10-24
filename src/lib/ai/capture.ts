@@ -75,13 +75,13 @@ export async function captureCommands(problem: Problem, message: Message): Promi
       needsAdmin: Boolean(meta?.needs_admin) || floor.needsAdmin,
     };
     const fp = fingerprint(block.code);
-    const existing = repo.getCommandIdByFingerprint(fp);
+    const existing = repo.getCommandIdByFingerprint(problem.accountId, fp);
     let id: number;
     if (existing) {
       id = existing;
       if (meta) repo.updateCommand(id, fields);
     } else {
-      id = repo.insertCommand(block.code, fp, fields);
+      id = repo.insertCommand(problem.accountId, block.code, fp, fields);
     }
     repo.addCommandUse(id, problem.id, message.id, clean(meta?.how_used, 400) ?? fallbackContext);
   });

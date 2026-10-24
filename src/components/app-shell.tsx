@@ -15,10 +15,12 @@ const COLLAPSED_KEY = 'ithd.sidebarCollapsed';
 export function AppShell({
   initialProblems,
   environments,
+  account,
   children,
 }: {
   initialProblems: ProblemListItem[];
   environments: EnvironmentOption[];
+  account: { name: string; isOwner: boolean };
   children: React.ReactNode;
 }) {
   const [drawer, setDrawer] = useState(false);
@@ -89,7 +91,7 @@ export function AppShell({
         </nav>
       ) : (
         <aside className="hidden w-[17rem] shrink-0 border-r border-zinc-200/80 bg-sidebar md:flex dark:border-zinc-800/80">
-          <Sidebar initialProblems={initialProblems} environments={environments} onCollapse={() => toggle(true)} />
+          <Sidebar initialProblems={initialProblems} environments={environments} account={account} onCollapse={() => toggle(true)} />
         </aside>
       )}
 
@@ -98,7 +100,7 @@ export function AppShell({
         <div className="fixed inset-0 z-40 md:hidden">
           <button aria-label="Close menu" className="absolute inset-0 bg-zinc-950/40 backdrop-blur-[2px]" onClick={() => setDrawer(false)} />
           <aside className="absolute inset-y-0 left-0 flex w-[17rem] max-w-[85vw] animate-fade-up bg-sidebar shadow-lift">
-            <Sidebar initialProblems={initialProblems} environments={environments} />
+            <Sidebar initialProblems={initialProblems} environments={environments} account={account} />
           </aside>
         </div>
       )}

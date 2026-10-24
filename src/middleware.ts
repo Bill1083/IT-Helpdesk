@@ -32,7 +32,10 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     const response = NextResponse.next();
     // Sliding expiry: a remembered session is pushed out again on use.
     if (session.remember && Date.now() - session.issuedAt > RENEW_AFTER_MS) {
-      const renewed = await createSessionToken(env.sessionSecret, true, env.rememberDays);
+      const renewed = await createSessionToken(env.sessionSecret, true, env.rememberDays, {
+        id: session.accountId,
+        version: session.version,
+      });
       response.cookies.set(SESSION_COOKIE, renewed.token, sessionCookieOptions(renewed.session, isHttps(request)));
     }
     return response;

@@ -119,6 +119,35 @@ const MIGRATIONS: (string | ((db: Database.Database) => void))[] = [
   ALTER TABLE problems ADD COLUMN root_cause TEXT;
   ALTER TABLE problems ADD COLUMN highlights TEXT NOT NULL DEFAULT '[]';
   `,
+  // 5: separate accounts, told apart by password. Everything so far belongs
+  // to the owner, whose password stays APP_PASSWORD in .env.
+  (db) => {
+    db.exec(`
+      CREATE TABLE accounts (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        password_hash TEXT,
+        must_change_password INTEGER NOT NULL DEFAULT 0,
+        session_version INTEGER NOT NULL DEFAULT 1,
+        is_owner INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        last_login_at INTEGER
+      );
+      ALTER TABLE problems ADD COLUMN account_id TEXT NOT NULL DEFAULT 'owner';
+      ALTER TABLE environments ADD COLUMN account_id TEXT NOT NULL DEFAULT 'owner';
+      ALTER TABLE commands ADD COLUMN account_id TEXT NOT NULL DEFAULT 'owner';
+      CREATE INDEX problems_account ON problems(account_id, updated_at DESC);
+      CREATE INDEX environments_account ON environments(account_id);
+      CREATE INDEX commands_account ON commands(account_id, last_used_at DESC);
+    `);
+    db.prepare(`INSERT INTO accounts (id, name, is_owner, created_at) VALUES ('owner', 'Owner', 1, ?)`).run(Date.now());
+    // Command fingerprints are unique per account, so they carry its id.
+    db.prepare(`UPDATE commands SET fingerprint = 'owner:' || fingerprint`).run();
+    // Personal settings become the owner's; backup status stays global.
+    for (const key of ['about', 'last_environment']) {
+      db.prepare(`UPDATE settings SET key = ? WHERE key = ?`).run(`${key}:owner`, key);
+    }
+  },
 ];
 
 declare global {

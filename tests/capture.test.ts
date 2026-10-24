@@ -18,16 +18,17 @@ afterAll(() => {
 describe('environments and command capture', () => {
   it('starts with a Default environment from the migration', async () => {
     const repo = await import('@/lib/repo');
-    expect(repo.listEnvironments().map((e) => e.name)).toEqual(['Default']);
+    expect(repo.listEnvironments(repo.OWNER_ID).map((e) => e.name)).toEqual(['Default']);
   });
 
   it('saves commands from a reply, once per command, with uses per chat', async () => {
     const repo = await import('@/lib/repo');
     const { captureCommands } = await import('@/lib/ai/capture');
-    const acme = repo.createEnvironment('Acme', '- Microsoft 365');
+    const acme = repo.createEnvironment(repo.OWNER_ID, 'Acme', '- Microsoft 365');
 
     const make = (description: string) =>
       repo.createProblem({
+        accountId: repo.OWNER_ID,
         description,
         reporter: 'Tom',
         attachments: [],
@@ -43,7 +44,7 @@ describe('environments and command capture', () => {
     const second = make('Teams blank screen again');
     await captureCommands(second, repo.addMessage({ problemId: second.id, role: 'assistant', kind: 'step', content: '```\nIPCONFIG /flushdns\n```' }));
 
-    const commands = repo.listCommands();
+    const commands = repo.listCommands(repo.OWNER_ID);
     expect(commands).toHaveLength(2);
     const flush = commands.find((c) => c.command.toLowerCase().includes('flushdns'))!;
     expect(flush.platform).toBe('windows');
@@ -57,8 +58,9 @@ describe('environments and command capture', () => {
 
   it('keeps chats when their environment is deleted', async () => {
     const repo = await import('@/lib/repo');
-    const env = repo.createEnvironment('Old client', '');
+    const env = repo.createEnvironment(repo.OWNER_ID, 'Old client', '');
     const { problem } = repo.createProblem({
+      accountId: repo.OWNER_ID,
       description: 'Printer offline',
       reporter: null,
       attachments: [],

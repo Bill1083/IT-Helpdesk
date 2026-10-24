@@ -3,8 +3,9 @@ import { z } from 'zod';
 
 import { describeError, liveTurn, streamTurn } from '@/lib/ai/engine';
 import { jsonError, readBody } from '@/lib/http';
-import { getProblem } from '@/lib/repo';
+import { getOwnedProblem } from '@/lib/repo';
 import { attachmentsSchema } from '@/lib/schemas';
+import { requireAccount } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,8 +23,10 @@ const schema = z.object({
  * produces the first step for a freshly created problem.
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await requireAccount();
+  if ('response' in auth) return auth.response;
   const { id } = await params;
-  if (!getProblem(id)) return jsonError('Problem not found.', 404);
+  if (!getOwnedProblem(id, auth.account.id)) return jsonError('Problem not found.', 404);
   const body = await readBody(request, schema);
   if ('response' in body) return body.response;
   const { kind, content, attachments, regenerate, provider, search } = body.data;

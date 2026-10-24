@@ -62,6 +62,7 @@ describe('closing and matching', () => {
   const make = async (description: string) => {
     const repo = await import('@/lib/repo');
     const { problem } = repo.createProblem({
+      accountId: repo.OWNER_ID,
       description,
       reporter: null,
       attachments: [],

@@ -3,7 +3,8 @@ import { z } from 'zod';
 
 import { jsonError, readBody } from '@/lib/http';
 import { MODE_KEYS } from '@/lib/modes';
-import { deleteProblem, getEnvironment, getProblem, updateProblem } from '@/lib/repo';
+import { deleteProblem, getOwnedEnvironment, getOwnedProblem, updateProblem } from '@/lib/repo';
+import { requireAccount } from '@/lib/session';
 import { problemView } from '@/lib/views';
 
 export const dynamic = 'force-dynamic';
@@ -11,7 +12,9 @@ export const dynamic = 'force-dynamic';
 type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const view = problemView((await params).id);
+  const auth = await requireAccount();
+  if ('response' in auth) return auth.response;
+  const view = problemView((await params).id, auth.account.id);
   return view ? NextResponse.json(view) : jsonError('Problem not found.', 404);
 }
 
@@ -24,12 +27,14 @@ const patchSchema = z.object({
 });
 
 export async function PATCH(request: NextRequest, { params }: Params) {
+  const auth = await requireAccount();
+  if ('response' in auth) return auth.response;
   const { id } = await params;
-  if (!getProblem(id)) return jsonError('Problem not found.', 404);
+  if (!getOwnedProblem(id, auth.account.id)) return jsonError('Problem not found.', 404);
   const body = await readBody(request, patchSchema);
   if ('response' in body) return body.response;
   const { title, reporter, status, environmentId, mode } = body.data;
-  if (environmentId && !getEnvironment(environmentId)) return jsonError('That environment no longer exists.');
+  if (environmentId && !getOwnedEnvironment(environmentId, auth.account.id)) return jsonError('That environment no longer exists.');
   const problem = updateProblem(id, {
     title: title === undefined ? undefined : title || null,
     reporter: reporter === undefined ? undefined : reporter || null,
@@ -42,8 +47,10 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
+  const auth = await requireAccount();
+  if ('response' in auth) return auth.response;
   const { id } = await params;
-  if (!getProblem(id)) return jsonError('Problem not found.', 404);
+  if (!getOwnedProblem(id, auth.account.id)) return jsonError('Problem not found.', 404);
   deleteProblem(id);
   return NextResponse.json({ ok: true });
 }

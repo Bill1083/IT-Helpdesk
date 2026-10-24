@@ -4,14 +4,17 @@ import { z } from 'zod';
 import { jsonError, readBody } from '@/lib/http';
 import { MODE_KEYS, guessMode } from '@/lib/modes';
 import { routePlaybooks } from '@/lib/playbooks';
-import { createProblem, getEnvironment, listProblems, setSetting } from '@/lib/repo';
+import { createProblem, getOwnedEnvironment, listProblems, setAccountSetting } from '@/lib/repo';
 import { attachmentsSchema } from '@/lib/schemas';
+import { requireAccount } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
-export function GET(request: NextRequest) {
+export async function GET(request: NextRequest) {
+  const auth = await requireAccount();
+  if ('response' in auth) return auth.response;
   const q = request.nextUrl.searchParams.get('q')?.trim() || undefined;
-  return NextResponse.json({ problems: listProblems({ q }) });
+  return NextResponse.json({ problems: listProblems(auth.account.id, { q }) });
 }
 
 const createSchema = z.object({
@@ -24,12 +27,16 @@ const createSchema = z.object({
 
 /** Saves the request and returns at once; the first reply streams from /turn. */
 export async function POST(request: NextRequest) {
+  const auth = await requireAccount();
+  if ('response' in auth) return auth.response;
+  const accountId = auth.account.id;
   const body = await readBody(request, createSchema);
   if ('response' in body) return body.response;
   const { description, reporter, attachments, environmentId, mode } = body.data;
-  if (environmentId && !getEnvironment(environmentId)) return jsonError('That environment no longer exists.');
+  if (environmentId && !getOwnedEnvironment(environmentId, accountId)) return jsonError('That environment no longer exists.');
 
   const { problem } = createProblem({
+    accountId,
     description,
     reporter: reporter || null,
     attachments,
@@ -39,6 +46,6 @@ export async function POST(request: NextRequest) {
     modeLocked: mode !== 'auto',
     categories: routePlaybooks(description),
   });
-  if (environmentId) setSetting('last_environment', environmentId);
+  if (environmentId) setAccountSetting(accountId, 'last_environment', environmentId);
   return NextResponse.json({ problem }, { status: 201 });
 }

@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { getDb, uploadsDir } from '@/lib/db';
 import type {
+  Account,
   Attachment,
   CommandPlatform,
   CommandUse,
@@ -21,6 +22,15 @@ import type {
   SavedCommand,
   Source,
 } from '@/lib/types';
+
+/**
+ * Data access. Everything a person sees is scoped by account: lists, search,
+ * matching, environments, commands and personal settings. Functions that take
+ * a bare id (getProblem, getEnvironment) are for internal use once a route
+ * has checked ownership with getOwnedProblem / getOwnedEnvironment.
+ */
+
+export const OWNER_ID = 'owner';
 
 /* ---------------------------------------------------------------- helpers */
 
@@ -42,6 +52,7 @@ type Row = Record<string, unknown>;
 function toProblem(row: Row): Problem {
   return {
     id: row.id as string,
+    accountId: (row.account_id as string) ?? OWNER_ID,
     title: (row.title as string | null) ?? null,
     description: row.description as string,
     reporter: (row.reporter as string | null) ?? null,
@@ -85,7 +96,7 @@ function toMessage(row: Row): Message {
   };
 }
 
-const PROBLEM_COLUMNS = `id, title, description, reporter, environment_id, mode, mode_locked, categories, status, summary, resolution, resolution_kind, root_cause, highlights,
+const PROBLEM_COLUMNS = `id, account_id, title, description, reporter, environment_id, mode, mode_locked, categories, status, summary, resolution, resolution_kind, root_cause, highlights,
   research_status, research_headline, research_brief, research_sources, research_queries,
   research_updated_at, related, created_at, updated_at, resolved_at`;
 
@@ -101,9 +112,91 @@ function refreshFts(id: string): void {
   db.prepare(`INSERT INTO problems_fts (problem_id, body) VALUES (?, ?)`).run(id, body);
 }
 
+/* --------------------------------------------------------------- accounts */
+
+function toAccount(row: Row): Account {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    isOwner: row.is_owner === 1,
+    mustChangePassword: row.must_change_password === 1,
+    sessionVersion: row.session_version as number,
+    createdAt: row.created_at as number,
+    lastLoginAt: (row.last_login_at as number | null) ?? null,
+  };
+}
+
+export function listAccounts(): Account[] {
+  const rows = getDb().prepare(`SELECT * FROM accounts ORDER BY is_owner DESC, name COLLATE NOCASE`).all() as Row[];
+  return rows.map(toAccount);
+}
+
+export function getAccount(id: string): Account | null {
+  const row = getDb().prepare(`SELECT * FROM accounts WHERE id = ?`).get(id) as Row | undefined;
+  return row ? toAccount(row) : null;
+}
+
+/** Accounts that sign in with a stored password (everyone but the owner). */
+export function passwordAccounts(): { account: Account; hash: string }[] {
+  const rows = getDb().prepare(`SELECT * FROM accounts WHERE password_hash IS NOT NULL`).all() as Row[];
+  return rows.map((row) => ({ account: toAccount(row), hash: row.password_hash as string }));
+}
+
+export function createAccount(name: string, passwordHash: string): Account {
+  const id = newId();
+  getDb()
+    // The first password comes from the owner, so it is temporary.
+    .prepare(`INSERT INTO accounts (id, name, password_hash, must_change_password, created_at) VALUES (?, ?, ?, 1, ?)`)
+    .run(id, name, passwordHash, Date.now());
+  return getAccount(id)!;
+}
+
+export function renameAccount(id: string, name: string): Account | null {
+  getDb().prepare(`UPDATE accounts SET name = ? WHERE id = ?`).run(name, id);
+  return getAccount(id);
+}
+
+/**
+ * New password; bumping the version signs the account out everywhere.
+ * temporary: set by the owner, so they must choose their own on next sign-in.
+ */
+export function setAccountPassword(id: string, passwordHash: string, { temporary }: { temporary: boolean }): Account | null {
+  getDb()
+    .prepare(
+      `UPDATE accounts SET password_hash = ?, must_change_password = ?, session_version = session_version + 1 WHERE id = ? AND is_owner = 0`,
+    )
+    .run(passwordHash, temporary ? 1 : 0, id);
+  return getAccount(id);
+}
+
+/** The stored hash for an account (for checking its current password). */
+export function getPasswordHash(id: string): string | null {
+  const row = getDb().prepare(`SELECT password_hash FROM accounts WHERE id = ?`).get(id) as { password_hash: string | null } | undefined;
+  return row?.password_hash ?? null;
+}
+
+export function recordLogin(id: string): void {
+  getDb().prepare(`UPDATE accounts SET last_login_at = ? WHERE id = ?`).run(Date.now(), id);
+}
+
+/** Removes the account and everything in it. The owner can't be deleted. */
+export function deleteAccount(id: string): void {
+  const db = getDb();
+  if (id === OWNER_ID) return;
+  const problems = db.prepare(`SELECT id FROM problems WHERE account_id = ?`).all(id) as { id: string }[];
+  for (const { id: problemId } of problems) deleteProblem(problemId);
+  db.transaction(() => {
+    db.prepare(`DELETE FROM commands WHERE account_id = ?`).run(id);
+    db.prepare(`DELETE FROM environments WHERE account_id = ?`).run(id);
+    db.prepare(`DELETE FROM settings WHERE key LIKE ?`).run(`%:${id}`);
+    db.prepare(`DELETE FROM accounts WHERE id = ? AND is_owner = 0`).run(id);
+  })();
+}
+
 /* --------------------------------------------------------------- problems */
 
 export function createProblem(input: {
+  accountId: string;
   description: string;
   reporter: string | null;
   attachments: Attachment[];
@@ -120,10 +213,11 @@ export function createProblem(input: {
   const now = Date.now();
   const messageId = db.transaction(() => {
     db.prepare(
-      `INSERT INTO problems (id, description, reporter, environment_id, mode, mode_locked, categories, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO problems (id, account_id, description, reporter, environment_id, mode, mode_locked, categories, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
+      input.accountId,
       input.description,
       input.reporter,
       input.environmentId,
@@ -143,9 +237,16 @@ export function createProblem(input: {
   return { problem: getProblem(id)!, message: getMessage(messageId)! };
 }
 
+/** Internal: no ownership check. Routes use getOwnedProblem. */
 export function getProblem(id: string): Problem | null {
   const row = getDb().prepare(`SELECT ${PROBLEM_COLUMNS} FROM problems WHERE id = ?`).get(id) as Row | undefined;
   return row ? toProblem(row) : null;
+}
+
+/** The problem only if it belongs to this account; otherwise it "doesn't exist". */
+export function getOwnedProblem(id: string, accountId: string): Problem | null {
+  const problem = getProblem(id);
+  return problem && problem.accountId === accountId ? problem : null;
 }
 
 export function getProblems(ids: string[]): Problem[] {
@@ -175,7 +276,7 @@ const STOPWORDS = new Set(
   ),
 );
 
-export function listProblems(opts: { q?: string; limit?: number } = {}): ProblemListItem[] {
+export function listProblems(accountId: string, opts: { q?: string; limit?: number } = {}): ProblemListItem[] {
   const db = getDb();
   const limit = opts.limit ?? 200;
   const query = opts.q ? ftsQuery(opts.q) : null;
@@ -184,10 +285,12 @@ export function listProblems(opts: { q?: string; limit?: number } = {}): Problem
     ? (db
         .prepare(
           `SELECT ${columns} FROM problems_fts f JOIN problems p ON p.id = f.problem_id
-           WHERE problems_fts MATCH ? ORDER BY bm25(problems_fts) LIMIT ?`,
+           WHERE problems_fts MATCH ? AND p.account_id = ? ORDER BY bm25(problems_fts) LIMIT ?`,
         )
-        .all(query, limit) as Row[])
-    : (db.prepare(`SELECT ${columns} FROM problems p ORDER BY p.updated_at DESC LIMIT ?`).all(limit) as Row[]);
+        .all(query, accountId, limit) as Row[])
+    : (db
+        .prepare(`SELECT ${columns} FROM problems p WHERE p.account_id = ? ORDER BY p.updated_at DESC LIMIT ?`)
+        .all(accountId, limit) as Row[]);
   return rows.map((row) => ({
     id: row.id as string,
     title: (row.title as string | null) ?? null,
@@ -202,17 +305,16 @@ export function listProblems(opts: { q?: string; limit?: number } = {}): Problem
   }));
 }
 
-/** Keyword matches ranked by BM25, for live suggestions and the no-embedding fallback. */
-export function keywordMatches(text: string, limit: number, excludeId?: string): { id: string; rank: number }[] {
+/** Keyword matches within one account, ranked by BM25, for live suggestions. */
+export function keywordMatches(text: string, limit: number, accountId: string, excludeId?: string): { id: string; rank: number }[] {
   const query = ftsQuery(text);
   if (!query) return [];
-  const rows = getDb()
+  return getDb()
     .prepare(
-      `SELECT problem_id AS id, bm25(problems_fts) AS rank FROM problems_fts
-       WHERE problems_fts MATCH ? AND problem_id != ? ORDER BY rank LIMIT ?`,
+      `SELECT f.problem_id AS id, bm25(problems_fts) AS rank FROM problems_fts f JOIN problems p ON p.id = f.problem_id
+       WHERE problems_fts MATCH ? AND p.account_id = ? AND f.problem_id != ? ORDER BY rank LIMIT ?`,
     )
-    .all(query, excludeId ?? '', limit) as { id: string; rank: number }[];
-  return rows;
+    .all(query, accountId, excludeId ?? '', limit) as { id: string; rank: number }[];
 }
 
 export interface ProblemPatch {
@@ -293,13 +395,13 @@ export function deleteProblem(id: string): void {
   db.prepare(`DELETE FROM problems_fts WHERE problem_id = ?`).run(id);
 }
 
-export function reporters(): string[] {
+export function reporters(accountId: string): string[] {
   const rows = getDb()
     .prepare(
-      `SELECT reporter FROM problems WHERE reporter IS NOT NULL AND reporter != ''
+      `SELECT reporter FROM problems WHERE account_id = ? AND reporter IS NOT NULL AND reporter != ''
        GROUP BY reporter ORDER BY MAX(updated_at) DESC LIMIT 200`,
     )
-    .all() as { reporter: string }[];
+    .all(accountId) as { reporter: string }[];
   return rows.map((r) => r.reporter);
 }
 
@@ -311,10 +413,11 @@ export function setEmbedding(id: string, vector: Float32Array): void {
     .run(Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength), id);
 }
 
-export function allEmbeddings(excludeId: string): { id: string; vector: Float32Array }[] {
+/** Past problems' vectors within one account: matching never crosses accounts. */
+export function allEmbeddings(excludeId: string, accountId: string): { id: string; vector: Float32Array }[] {
   const rows = getDb()
-    .prepare(`SELECT id, embedding FROM problems WHERE embedding IS NOT NULL AND id != ?`)
-    .all(excludeId) as { id: string; embedding: Buffer }[];
+    .prepare(`SELECT id, embedding FROM problems WHERE embedding IS NOT NULL AND id != ? AND account_id = ?`)
+    .all(excludeId, accountId) as { id: string; embedding: Buffer }[];
   return rows.map((row) => ({
     id: row.id,
     vector: new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.byteLength / 4),
@@ -373,6 +476,7 @@ export function deleteMessage(id: number): void {
 
 /* --------------------------------------------------------------- settings */
 
+/** Server-wide settings (backup status). */
 export function getSetting(key: string): string | null {
   const row = getDb().prepare(`SELECT value FROM settings WHERE key = ?`).get(key) as { value: string } | undefined;
   return row?.value ?? null;
@@ -382,6 +486,15 @@ export function setSetting(key: string, value: string): void {
   getDb()
     .prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
     .run(key, value);
+}
+
+/** Personal settings ("about", last environment), one copy per account. */
+export function getAccountSetting(accountId: string, key: string): string | null {
+  return getSetting(`${key}:${accountId}`);
+}
+
+export function setAccountSetting(accountId: string, key: string, value: string): void {
+  setSetting(`${key}:${accountId}`, value);
 }
 
 /* ----------------------------------------------------------- environments */
@@ -396,28 +509,34 @@ function toEnvironment(row: Row): Environment {
   };
 }
 
-export function listEnvironments(): EnvironmentSummary[] {
+export function listEnvironments(accountId: string): EnvironmentSummary[] {
   const rows = getDb()
     .prepare(
       `SELECT e.*, (SELECT COUNT(*) FROM problems p WHERE p.environment_id = e.id) AS problem_count
-       FROM environments e ORDER BY e.name COLLATE NOCASE`,
+       FROM environments e WHERE e.account_id = ? ORDER BY e.name COLLATE NOCASE`,
     )
-    .all() as Row[];
+    .all(accountId) as Row[];
   return rows.map((row) => ({ ...toEnvironment(row), problemCount: row.problem_count as number }));
 }
 
+/** Internal: no ownership check. Routes use getOwnedEnvironment. */
 export function getEnvironment(id: string | null): Environment | null {
   if (!id) return null;
   const row = getDb().prepare(`SELECT * FROM environments WHERE id = ?`).get(id) as Row | undefined;
   return row ? toEnvironment(row) : null;
 }
 
-export function createEnvironment(name: string, profile: string): Environment {
+export function getOwnedEnvironment(id: string, accountId: string): Environment | null {
+  const row = getDb().prepare(`SELECT * FROM environments WHERE id = ? AND account_id = ?`).get(id, accountId) as Row | undefined;
+  return row ? toEnvironment(row) : null;
+}
+
+export function createEnvironment(accountId: string, name: string, profile: string): Environment {
   const id = newId();
   const now = Date.now();
   getDb()
-    .prepare(`INSERT INTO environments (id, name, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`)
-    .run(id, name, profile, now, now);
+    .prepare(`INSERT INTO environments (id, account_id, name, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(id, accountId, name, profile, now, now);
   return getEnvironment(id)!;
 }
 
@@ -441,8 +560,15 @@ export function deleteEnvironment(id: string): void {
 
 /* --------------------------------------------------------------- commands */
 
-export function getCommandIdByFingerprint(fp: string): number | null {
-  const row = getDb().prepare(`SELECT id FROM commands WHERE fingerprint = ?`).get(fp) as { id: number } | undefined;
+/** Fingerprints are unique per account, so each one carries the account id. */
+function scopedFingerprint(accountId: string, fp: string): string {
+  return `${accountId}:${fp}`;
+}
+
+export function getCommandIdByFingerprint(accountId: string, fp: string): number | null {
+  const row = getDb()
+    .prepare(`SELECT id FROM commands WHERE fingerprint = ?`)
+    .get(scopedFingerprint(accountId, fp)) as { id: number } | undefined;
   return row?.id ?? null;
 }
 
@@ -457,16 +583,17 @@ export interface CommandFields {
   needsAdmin: boolean;
 }
 
-export function insertCommand(command: string, fp: string, fields: CommandFields): number {
+export function insertCommand(accountId: string, command: string, fp: string, fields: CommandFields): number {
   const now = Date.now();
   return getDb()
     .prepare(
-      `INSERT INTO commands (command, fingerprint, platform, shell, title, description, when_to_use, danger, danger_notes, needs_admin, created_at, last_used_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO commands (account_id, command, fingerprint, platform, shell, title, description, when_to_use, danger, danger_notes, needs_admin, created_at, last_used_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
+      accountId,
       command,
-      fp,
+      scopedFingerprint(accountId, fp),
       fields.platform,
       fields.shell,
       fields.title,
@@ -518,18 +645,20 @@ export function addCommandUse(commandId: number, problemId: string, messageId: n
   db.prepare(`UPDATE commands SET last_used_at = ? WHERE id = ?`).run(now, commandId);
 }
 
-export function listCommands(): SavedCommand[] {
+export function listCommands(accountId: string): SavedCommand[] {
   const db = getDb();
-  const rows = db.prepare(`SELECT * FROM commands ORDER BY last_used_at DESC`).all() as Row[];
+  const rows = db.prepare(`SELECT * FROM commands WHERE account_id = ? ORDER BY last_used_at DESC`).all(accountId) as Row[];
   const uses = db
     .prepare(
       `SELECT u.id, u.command_id, u.problem_id, u.context, u.created_at, p.title AS problem_title, p.description AS problem_description, e.name AS environment_name
        FROM command_uses u
+       JOIN commands c ON c.id = u.command_id
        LEFT JOIN problems p ON p.id = u.problem_id
        LEFT JOIN environments e ON e.id = p.environment_id
+       WHERE c.account_id = ?
        ORDER BY u.created_at DESC`,
     )
-    .all() as Row[];
+    .all(accountId) as Row[];
   const byCommand = new Map<number, CommandUse[]>();
   for (const u of uses) {
     const list = byCommand.get(u.command_id as number) ?? [];
@@ -560,8 +689,8 @@ export function listCommands(): SavedCommand[] {
   }));
 }
 
-export function deleteCommand(id: number): boolean {
-  return getDb().prepare(`DELETE FROM commands WHERE id = ?`).run(id).changes > 0;
+export function deleteCommand(id: number, accountId: string): boolean {
+  return getDb().prepare(`DELETE FROM commands WHERE id = ? AND account_id = ?`).run(id, accountId).changes > 0;
 }
 
 /* ---------------------------------------------------------------- uploads */

@@ -6,13 +6,16 @@ import {
   Check,
   CheckCircle2,
   CloudUpload,
+  Copy,
   Download,
   Loader2,
   Plug,
   Plus,
   Sparkles,
+  KeyRound,
   Trash2,
   UserRound,
+  Users,
   XCircle,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -23,7 +26,7 @@ import { ErrorDetails, ErrorNotice, HintText } from '@/components/error-notice';
 import { useInstallPrompt } from '@/components/pwa';
 import { api, cn, shortDate } from '@/lib/client';
 import { explainError } from '@/lib/errors';
-import type { BackupStatus, ConnectionCheck, Environment, EnvironmentSummary } from '@/lib/types';
+import type { Account, BackupStatus, ConnectionCheck, Environment, EnvironmentSummary } from '@/lib/types';
 
 const PROFILE_TEMPLATE = `- Identity & email: (Google Workspace / Microsoft 365 / Okta…)
 - Devices: (MDM, Mac/Windows mix, how many)
@@ -103,6 +106,7 @@ function Section({
 }
 
 export function SettingsForm({
+  account,
   about,
   defaultAbout,
   environments,
@@ -112,7 +116,9 @@ export function SettingsForm({
   rememberDays,
   backup,
   backupKeepDays,
+  accounts,
 }: {
+  account: { name: string; isOwner: boolean };
   about: string;
   defaultAbout: string;
   environments: EnvironmentSummary[];
@@ -120,8 +126,11 @@ export function SettingsForm({
   fastModel: string;
   researchModel: string;
   rememberDays: number;
-  backup: BackupStatus;
+  /** Owner only; null for everyone else. */
+  backup: BackupStatus | null;
   backupKeepDays: number;
+  /** Owner only; null for everyone else. */
+  accounts: Account[] | null;
 }) {
   const router = useRouter();
   const [value, setValue] = useState(about);
@@ -197,9 +206,13 @@ export function SettingsForm({
           </div>
         </Section>
 
+        <PasswordSection isOwner={account.isOwner} />
+
+        {accounts && <AccountsSection initial={accounts} />}
+
         <DesktopAppSection rememberDays={rememberDays} />
 
-        <BackupSection initial={backup} keepDays={backupKeepDays} />
+        {backup && <BackupSection initial={backup} keepDays={backupKeepDays} />}
 
         <Section icon={<Sparkles className="size-[18px]" />} title="AI" description="Keys and models live in the server's .env file.">
           <div className="divide-y divide-zinc-100 overflow-hidden rounded-xl ring-1 ring-zinc-200/90 dark:divide-zinc-800 dark:ring-zinc-800">
@@ -495,6 +508,319 @@ function ConnectionChecks({ checks }: { checks: ConnectionCheck[] }) {
         ))}
       </ol>
     </div>
+  );
+}
+
+/** A password shown exactly once, with a copy button. Used for new accounts and resets. */
+function PasswordReveal({ password, onDone }: { password: string; onDone: () => void }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="mt-3 animate-pop-in rounded-xl bg-accent/[0.05] p-3.5 ring-1 ring-inset ring-accent/20">
+      <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">
+        Send this password to them. It&apos;s shown only this once.
+      </p>
+      <div className="mt-2 flex items-center gap-2">
+        <code className="flex-1 rounded-lg bg-white px-3 py-2 font-mono text-sm tracking-wide text-zinc-900 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:text-zinc-100 dark:ring-zinc-800">
+          {password}
+        </code>
+        <button
+          type="button"
+          onClick={async () => {
+            await navigator.clipboard.writeText(password);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          }}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-sm font-medium ring-1 ring-zinc-200 transition hover:ring-zinc-300 dark:bg-zinc-900 dark:ring-zinc-800 dark:hover:ring-zinc-700"
+        >
+          {copied ? <Check className="size-4 text-emerald-600" /> : <Copy className="size-4" />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <p className="mt-2 text-xs text-zinc-500">
+        It&apos;s temporary: they&apos;ll be asked to choose their own password the first time they sign in.
+      </p>
+      <button
+        type="button"
+        onClick={onDone}
+        className="mt-3 text-sm font-medium text-accent hover:underline"
+      >
+        Done
+      </button>
+    </div>
+  );
+}
+
+function AccountsSection({ initial }: { initial: Account[] }) {
+  const [accounts, setAccounts] = useState(initial);
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [newPassword, setNewPassword] = useState<string | null>(null);
+
+  async function refresh() {
+    try {
+      const { accounts: next } = await api<{ accounts: Account[] }>('/api/accounts');
+      setAccounts(next);
+    } catch {
+      // keep the current list
+    }
+  }
+
+  async function create() {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    try {
+      const { password } = await api<{ account: Account; password: string }>('/api/accounts', {
+        method: 'POST',
+        json: { name: name.trim() },
+      });
+      setName('');
+      setAdding(false);
+      setNewPassword(password);
+      await refresh();
+    } catch (e) {
+      toast.error("Couldn't create the account", { description: e instanceof Error ? e.message : undefined });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Section
+      icon={<Users className="size-[18px]" />}
+      title="Accounts"
+      description="A separate account for each person, told apart only by password. Their chats, environments and commands are private to them."
+      action={
+        !adding && (
+          <SecondaryButton onClick={() => setAdding(true)} className="shrink-0">
+            <Plus className="size-4" /> Add
+          </SecondaryButton>
+        )
+      }
+    >
+      <div className="space-y-3">
+        {adding && (
+          <div className="flex items-center gap-2 rounded-xl bg-accent/[0.04] p-3 ring-1 ring-accent/25">
+            <input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && void create()}
+              placeholder="Their name"
+              className="min-w-0 flex-1 rounded-lg bg-white px-3 py-2 text-sm outline-none ring-1 ring-zinc-200 focus:ring-2 focus:ring-accent/40 dark:bg-zinc-950 dark:ring-zinc-800"
+            />
+            <PrimaryButton onClick={create} disabled={busy || !name.trim()}>
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Create
+            </PrimaryButton>
+            <button
+              onClick={() => {
+                setAdding(false);
+                setName('');
+              }}
+              className="rounded-lg px-3 py-2 text-sm text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+        {newPassword && <PasswordReveal password={newPassword} onDone={() => setNewPassword(null)} />}
+
+        {accounts.map((a) => (
+          <AccountRow key={a.id} account={a} onChanged={refresh} onPassword={setNewPassword} />
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+function AccountRow({
+  account,
+  onChanged,
+  onPassword,
+}: {
+  account: Account;
+  onChanged: () => void;
+  onPassword: (password: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(account.name);
+  const [busy, setBusy] = useState(false);
+
+  async function rename() {
+    setEditing(false);
+    if (!name.trim() || name === account.name) {
+      setName(account.name);
+      return;
+    }
+    try {
+      await api(`/api/accounts/${account.id}`, { method: 'PATCH', json: { name: name.trim() } });
+      toast.success('Renamed');
+      onChanged();
+    } catch (e) {
+      setName(account.name);
+      toast.error("Couldn't rename", { description: e instanceof Error ? e.message : undefined });
+    }
+  }
+
+  async function resetPassword() {
+    if (!window.confirm(`Reset ${account.name}'s password? Their current one stops working right away.`)) return;
+    setBusy(true);
+    try {
+      const { password } = await api<{ password: string }>(`/api/accounts/${account.id}/password`, { method: 'POST' });
+      onPassword(password);
+    } catch (e) {
+      toast.error("Couldn't reset the password", { description: e instanceof Error ? e.message : undefined });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!window.confirm(`Delete ${account.name}'s account? All of their chats, environments and commands are deleted too. This can't be undone.`)) return;
+    setBusy(true);
+    try {
+      await api(`/api/accounts/${account.id}`, { method: 'DELETE' });
+      toast(`Deleted ${account.name}`);
+      onChanged();
+    } catch (e) {
+      toast.error("Couldn't delete the account", { description: e instanceof Error ? e.message : undefined });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-zinc-50/60 p-3 ring-1 ring-zinc-200/80 dark:bg-zinc-950/40 dark:ring-zinc-800">
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent/15 text-xs font-semibold uppercase text-accent">
+        {account.name.trim().charAt(0) || '?'}
+      </span>
+      <div className="min-w-0 flex-1">
+        {editing ? (
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={rename}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void rename();
+              if (e.key === 'Escape') {
+                setName(account.name);
+                setEditing(false);
+              }
+            }}
+            className="w-full rounded-md bg-white px-1.5 py-0.5 text-sm font-medium outline-none ring-2 ring-accent/40 dark:bg-zinc-900"
+          />
+        ) : (
+          <button onClick={() => setEditing(true)} className="truncate text-sm font-medium hover:underline">
+            {account.name}
+          </button>
+        )}
+        <p className="mt-0.5 text-xs text-zinc-500">
+          {account.isOwner
+            ? 'Owner · password is APP_PASSWORD in .env'
+            : account.mustChangePassword
+              ? 'Waiting for them to create their own password'
+              : account.lastLoginAt
+                ? `Last signed in ${shortDate(account.lastLoginAt)}`
+                : "Hasn't signed in yet"}
+        </p>
+      </div>
+      {!account.isOwner && (
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            onClick={resetPassword}
+            disabled={busy}
+            title="Reset password"
+            className="rounded-lg p-2 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-50 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            <KeyRound className="size-4" />
+          </button>
+          <button
+            onClick={remove}
+            disabled={busy}
+            title="Delete account"
+            className="rounded-lg p-2 text-zinc-500 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+          >
+            <Trash2 className="size-4" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PasswordSection({ isOwner }: { isOwner: boolean }) {
+  const [current, setCurrent] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [state, setState] = useState<SaveState>('idle');
+  const [error, setError] = useState<string | null>(null);
+
+  if (isOwner) {
+    return (
+      <Section icon={<KeyRound className="size-[18px]" />} title="Your password" description="The owner's password is APP_PASSWORD in the server's .env file.">
+        <p className="text-sm text-zinc-500">Change it there and restart the container to update it.</p>
+      </Section>
+    );
+  }
+
+  const longEnough = password.length >= 10;
+  const matches = password.length > 0 && password === confirm;
+  const canSave = longEnough && matches && current.length > 0 && !busy;
+
+  async function save() {
+    if (!canSave) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api('/api/account/password', { method: 'POST', json: { current, password } });
+      setCurrent('');
+      setPassword('');
+      setConfirm('');
+      setState('saved');
+      toast.success('Password changed');
+      setTimeout(() => setState('idle'), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not change your password.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Section icon={<KeyRound className="size-[18px]" />} title="Your password" description="Change the password you sign in with.">
+      <div className="max-w-sm space-y-2.5">
+        <input
+          type="password"
+          autoComplete="current-password"
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+          placeholder="Current password"
+          className={inputClass}
+        />
+        <input
+          type="password"
+          autoComplete="new-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="New password (at least 10 characters)"
+          className={inputClass}
+        />
+        <input
+          type="password"
+          autoComplete="new-password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          placeholder="Confirm new password"
+          className={cn(inputClass, confirm.length > 0 && !matches && 'ring-red-300 focus:ring-red-400/60 dark:ring-red-900')}
+        />
+      </div>
+      {error && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
+      <div className="mt-3">
+        <SaveButton state={state} disabled={!canSave} onClick={save} label="Change password" />
+      </div>
+    </Section>
   );
 }
 

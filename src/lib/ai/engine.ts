@@ -53,9 +53,9 @@ export function aiStatus() {
   };
 }
 
-/** The admin's own background, shared across every client environment. */
-export function aboutProfile(): string {
-  return repo.getSetting('about') ?? DEFAULT_ABOUT;
+/** The account's own background, shared across its client environments. */
+export function aboutProfile(accountId: string): string {
+  return repo.getAccountSetting(accountId, 'about') ?? DEFAULT_ABOUT;
 }
 
 /* ---------------------------------------------------------------- utils */
@@ -223,7 +223,8 @@ export function similarFromMatches(matches: RelatedMatch[], { requireReason = tr
   const judged = requireReason ? matches.filter((m) => m.reason) : matches;
   if (judged.length === 0) return [];
   const byId = new Map(repo.getProblems(judged.map((m) => m.id)).map((p) => [p.id, p]));
-  const envNames = new Map(repo.listEnvironments().map((e) => [e.id, e.name]));
+  const envIds = new Set([...byId.values()].map((p) => p.environmentId).filter((v): v is string => Boolean(v)));
+  const envNames = new Map([...envIds].map((envId) => [envId, repo.getEnvironment(envId)?.name ?? null]));
   return judged.flatMap((m) => {
     const p = byId.get(m.id);
     if (!p) return [];
@@ -288,7 +289,7 @@ export async function findSimilar(problem: Problem): Promise<SimilarProblem[]> {
       const vector = await geminiEmbed(problem.description);
       repo.setEmbedding(problem.id, vector);
       const nearest = repo
-        .allEmbeddings(problem.id)
+        .allEmbeddings(problem.id, problem.accountId)
         .filter((e) => e.vector.length === vector.length)
         .map((e) => ({ id: e.id, score: Math.round(cosine(vector, e.vector) * 1000) / 1000 }))
         .filter((m) => m.score >= env.similarityThreshold)
@@ -552,7 +553,7 @@ async function* turnEvents(problemId: string, opts: TurnOptions): AsyncGenerator
     researchBrief: ready ? problem.researchBrief : null,
     researching: problem.researchStatus === 'running',
   });
-  const system = buildSystemPrompt({ about: aboutProfile(), environment, categories: problem.categories });
+  const system = buildSystemPrompt({ about: aboutProfile(problem.accountId), environment, categories: problem.categories });
   const turns = buildTurns(problem, messages, similar, environment?.name ?? null, context);
   const search = Boolean(opts.search) || !ready;
 

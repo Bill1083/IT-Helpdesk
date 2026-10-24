@@ -150,6 +150,20 @@ docker compose up -d
 3. Screenshots: copy the files under `uploads/` in the bucket back into the volume's `uploads/` folder (for example
    with `rclone copy`). Chats work without them; only old attachments would be missing.
 
+## 7. Add accounts for other people
+
+Your password (`APP_PASSWORD`) is the owner account. Anyone else gets their own account, told apart only by
+password, with its own chats, environments, "Seen before" matching and Useful commands - none of it visible to the
+others.
+
+1. Sign in as the owner, open **Settings → Accounts → Add**, and give it their name.
+2. Copy the generated password shown once and send it to them (Slack DM, not a shared doc).
+3. The first time they sign in with it, they're asked to choose their own password before they can do anything
+   else. If you ever need to reset someone's password, the same thing happens again on their next sign-in.
+
+Only the owner sees Settings → Accounts and Settings → Backups; everyone else sees their own environments, "About
+you" and a "Your password" field to change it themselves.
+
 ## Updating
 
 ```bash
