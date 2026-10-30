@@ -21,6 +21,16 @@ export type ClaudeChunk =
 const MAX_CONTINUATIONS = 3;
 
 /**
+ * The Anthropic SDK's own default (10 minutes) is longer than nginx's own
+ * proxy timeout for this endpoint (300s) - better to fail fast with an
+ * honest "took too long" than have the connection cut from underneath it.
+ * One budget for the whole call, not per round: "Think harder" can run
+ * several search rounds, and re-arming it each round could add up to more
+ * than nginx's own cutoff, which is worse than having no timeout at all.
+ */
+const STREAM_TIMEOUT_MS = 240_000;
+
+/**
  * "Think harder": Claude with adaptive thinking at high effort plus server-side
  * web search. Refusals fall back to Anthropic's recommended model server-side.
  */
@@ -30,6 +40,8 @@ export async function* streamClaude(opts: {
   signal?: AbortSignal;
 }): AsyncGenerator<ClaudeChunk> {
   const messages = [...opts.messages];
+  const timeout = AbortSignal.timeout(STREAM_TIMEOUT_MS);
+  const signal = opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout;
   for (let round = 0; round <= MAX_CONTINUATIONS; round += 1) {
     const stream = client().beta.messages.stream(
       {
@@ -42,7 +54,7 @@ export async function* streamClaude(opts: {
         betas: ['server-side-fallback-2026-07-01'],
         fallbacks: 'default',
       },
-      { signal: opts.signal },
+      { signal },
     );
 
     for await (const event of stream) {

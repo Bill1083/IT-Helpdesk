@@ -61,6 +61,19 @@ function fromGrounding(metadata: GroundingMetadata | undefined): { sources: Sour
 
 export type GeminiChunk = { type: 'text'; text: string } | { type: 'grounding'; sources: Source[]; queries: string[] };
 
+/**
+ * A stalled request to Gemini (or the network path to it) otherwise hangs
+ * forever: nothing times out until nginx's own proxy_read_timeout kills the
+ * connection out from under it, which the browser then reports as a generic
+ * "check your internet connection" rather than anything AI-specific.
+ */
+const STREAM_TIMEOUT_MS = 120_000;
+
+function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
 export async function* streamGemini(opts: {
   model: string;
   system: string;
@@ -74,7 +87,7 @@ export async function* streamGemini(opts: {
     maxOutputTokens: 16_384,
     thinkingConfig: { thinkingLevel: opts.thinking },
     ...(opts.search ? { tools: [{ googleSearch: {} }] } : {}),
-    ...(opts.signal ? { abortSignal: opts.signal } : {}),
+    abortSignal: withTimeout(opts.signal, STREAM_TIMEOUT_MS),
   };
   const stream = await withThinkingFallback(config, (c) =>
     client().models.generateContentStream({ model: opts.model, contents: opts.contents, config: c }),

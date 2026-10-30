@@ -15,10 +15,24 @@ const schema = z.object({
   remember: z.boolean().default(false),
 });
 
-/** Simple in-memory brake on guessing: 10 failures per 15 minutes per IP. */
+/**
+ * Simple in-memory brake on guessing: 10 failures per 15 minutes per IP.
+ * A public login endpoint gets found by scanners within days of going live
+ * (certificate-transparency logs advertise new subdomains immediately), so
+ * this is swept periodically rather than growing by one entry per IP forever.
+ */
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_FAILURES = 10;
 const failures = new Map<string, { count: number; since: number }>();
+let lastSweep = Date.now();
+
+function pruneStaleFailures(now: number): void {
+  if (now - lastSweep < WINDOW_MS) return;
+  lastSweep = now;
+  for (const [ip, record] of failures) {
+    if (now - record.since >= WINDOW_MS) failures.delete(ip);
+  }
+}
 
 function clientIp(request: NextRequest): string {
   return request.headers.get('x-real-ip') ?? request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
@@ -38,6 +52,7 @@ export async function POST(request: NextRequest) {
   if (!env.appPassword) return jsonError('APP_PASSWORD is not set in .env on the server.', 500);
 
   const ip = clientIp(request);
+  pruneStaleFailures(Date.now());
   const record = failures.get(ip);
   if (record && Date.now() - record.since < WINDOW_MS && record.count >= MAX_FAILURES) {
     return jsonError('Too many attempts. Wait 15 minutes and try again.', 429);
