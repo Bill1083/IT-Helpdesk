@@ -5,6 +5,7 @@ import { aboutProfile, aiStatus } from '@/lib/ai/engine';
 import { backupStatus } from '@/lib/backup';
 import { env } from '@/lib/env';
 import { DEFAULT_ABOUT } from '@/lib/prompts';
+import { reportName } from '@/lib/report/build';
 import { listAccounts, listEnvironments } from '@/lib/repo';
 import { currentAccount } from '@/lib/session';
 
@@ -20,6 +21,7 @@ export default async function SettingsPage() {
       account={{ name: account.name, isOwner: account.isOwner }}
       about={aboutProfile(account.id)}
       defaultAbout={DEFAULT_ABOUT}
+      reportName={reportName(account.id)}
       environments={listEnvironments(account.id)}
       ai={aiStatus()}
       fastModel={env.geminiFastModel}

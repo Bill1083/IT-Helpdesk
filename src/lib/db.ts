@@ -148,6 +148,9 @@ const MIGRATIONS: (string | ((db: Database.Database) => void))[] = [
       db.prepare(`UPDATE settings SET key = ? WHERE key = ?`).run(`${key}:owner`, key);
     }
   },
+  // 6: extra details the admin adds when exporting a service report, kept so
+  // the next export of the same chat starts from them.
+  `ALTER TABLE problems ADD COLUMN report_notes TEXT;`,
 ];
 
 declare global {

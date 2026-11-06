@@ -20,6 +20,11 @@ tries that fix first.
   server, so history is the same everywhere.
 - **Off-site backups.** A daily database snapshot and new screenshots go to a Cloudflare R2 bucket, with 30 days of
   history and status in Settings.
+- **PDF service reports.** **Export PDF** on any chat writes a branded, client-ready report: Objective, Solution,
+  Technical implementation (steps taken with their results, technical details, commands used), Root cause and
+  Recommendations. Add anything that never made it into the chat before exporting. The layout is fixed in code and
+  the AI only fills in length-limited text, so every report has the same structure however long the chat was. The
+  business name on reports is set in Settings; the logo is `assets/brand/logo.png`.
 - **Separate accounts.** The owner's password is `APP_PASSWORD` in `.env`; the owner can create extra accounts in
   Settings → Accounts for other people, told apart only by password. Each account's chats, environments, commands
   and "Seen before" matching are private to it. A new or reset password is temporary: the first sign-in asks that

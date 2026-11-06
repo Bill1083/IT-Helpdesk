@@ -89,7 +89,7 @@ export function stepTitle(content: string): string | null {
   return match ? match[1].replace(/\*\*/g, '').trim() : null;
 }
 
-function transcript(problem: Problem, messages: Message[]): string {
+export function transcript(problem: Problem, messages: Message[]): string {
   return messages
     .map((m) =>
       m.role === 'assistant'

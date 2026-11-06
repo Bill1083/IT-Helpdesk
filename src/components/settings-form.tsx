@@ -8,6 +8,7 @@ import {
   CloudUpload,
   Copy,
   Download,
+  FileText,
   Loader2,
   Plug,
   Plus,
@@ -109,6 +110,7 @@ export function SettingsForm({
   account,
   about,
   defaultAbout,
+  reportName,
   environments,
   ai,
   fastModel,
@@ -121,6 +123,8 @@ export function SettingsForm({
   account: { name: string; isOwner: boolean };
   about: string;
   defaultAbout: string;
+  /** The business name printed on service reports. */
+  reportName: string;
   environments: EnvironmentSummary[];
   ai: { gemini: boolean; claude: boolean; geminiModel: string; claudeModel: string };
   fastModel: string;
@@ -173,6 +177,8 @@ export function SettingsForm({
             </button>
           </div>
         </Section>
+
+        <ReportsSection initial={reportName} />
 
         <Section
           icon={<Building2 className="size-[18px]" />}
@@ -234,6 +240,52 @@ export function SettingsForm({
         </Section>
       </div>
     </div>
+  );
+}
+
+function ReportsSection({ initial }: { initial: string }) {
+  const [value, setValue] = useState(initial);
+  const [saved, setSaved] = useState(initial);
+  const [state, setState] = useState<SaveState>('idle');
+
+  async function save() {
+    setState('saving');
+    try {
+      const data = await api<{ reportName: string }>('/api/settings', { method: 'PUT', json: { reportName: value } });
+      setValue(data.reportName);
+      setSaved(data.reportName);
+      setState('saved');
+      toast.success('Saved');
+      setTimeout(() => setState('idle'), 2000);
+    } catch (e) {
+      setState('error');
+      toast.error("Couldn't save", { description: e instanceof Error ? e.message : undefined });
+    }
+  }
+
+  return (
+    <Section
+      icon={<FileText className="size-[18px]" />}
+      title="Service reports"
+      description="Export PDF on any chat creates a client-ready report. This name appears as Prepared by and in the footer."
+    >
+      <label htmlFor="report-name" className="mb-1.5 block text-sm font-medium text-zinc-800 dark:text-zinc-200">
+        Business name
+      </label>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <input
+          id="report-name"
+          value={value}
+          maxLength={80}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && value !== saved) void save();
+          }}
+          className={cn(inputClass, 'sm:max-w-sm')}
+        />
+        <SaveButton state={state} disabled={value.trim() === saved} onClick={save} />
+      </div>
+    </Section>
   );
 }
 

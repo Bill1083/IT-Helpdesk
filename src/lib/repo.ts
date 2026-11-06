@@ -75,6 +75,7 @@ function toProblem(row: Row): Problem {
     researchQueries: parseJson<string[]>(row.research_queries, []),
     researchUpdatedAt: (row.research_updated_at as number | null) ?? null,
     related: parseJson<RelatedMatch[]>(row.related, []),
+    reportNotes: (row.report_notes as string | null) ?? null,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
     resolvedAt: (row.resolved_at as number | null) ?? null,
@@ -98,7 +99,7 @@ function toMessage(row: Row): Message {
 
 const PROBLEM_COLUMNS = `id, account_id, title, description, reporter, environment_id, mode, mode_locked, categories, status, summary, resolution, resolution_kind, root_cause, highlights,
   research_status, research_headline, research_brief, research_sources, research_queries,
-  research_updated_at, related, created_at, updated_at, resolved_at`;
+  research_updated_at, related, report_notes, created_at, updated_at, resolved_at`;
 
 /** Keep the keyword index in step with the searchable fields. */
 function refreshFts(id: string): void {
@@ -338,6 +339,7 @@ export interface ProblemPatch {
   researchUpdatedAt?: number | null;
   related?: RelatedMatch[];
   resolvedAt?: number | null;
+  reportNotes?: string | null;
 }
 
 const PATCH_COLUMNS: Record<keyof ProblemPatch, [string, (v: never) => unknown]> = {
@@ -361,6 +363,7 @@ const PATCH_COLUMNS: Record<keyof ProblemPatch, [string, (v: never) => unknown]>
   researchUpdatedAt: ['research_updated_at', (v) => v],
   related: ['related', (v: RelatedMatch[]) => JSON.stringify(v)],
   resolvedAt: ['resolved_at', (v) => v],
+  reportNotes: ['report_notes', (v) => v],
 };
 
 /** Partial update. `touch` bumps updated_at so the problem rises in the sidebar. */
@@ -687,6 +690,23 @@ export function listCommands(accountId: string): SavedCommand[] {
     lastUsedAt: row.last_used_at as number,
     uses: byCommand.get(row.id as number) ?? [],
   }));
+}
+
+/** Commands used in one chat, each once, in the order they were first used. */
+export function commandsForProblem(problemId: string): { command: string; title: string | null }[] {
+  return getDb()
+    .prepare(
+      `SELECT c.command, c.title, MIN(u.created_at) AS first_used
+       FROM command_uses u JOIN commands c ON c.id = u.command_id
+       WHERE u.problem_id = ?
+       GROUP BY c.id
+       ORDER BY first_used`,
+    )
+    .all(problemId)
+    .map((row) => {
+      const r = row as Row;
+      return { command: r.command as string, title: (r.title as string | null) ?? null };
+    });
 }
 
 export function deleteCommand(id: number, accountId: string): boolean {

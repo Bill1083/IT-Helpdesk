@@ -85,6 +85,8 @@ export interface Problem {
   researchQueries: string[];
   researchUpdatedAt: number | null;
   related: RelatedMatch[];
+  /** Extra details the admin added for the service report export. */
+  reportNotes: string | null;
   createdAt: number;
   updatedAt: number;
   resolvedAt: number | null;

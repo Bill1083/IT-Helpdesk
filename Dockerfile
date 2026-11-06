@@ -40,6 +40,8 @@ RUN mkdir -p /app/data && chown -R node:node /app
 
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+# Fonts and logo for the PDF service reports.
+COPY --from=builder --chown=node:node /app/assets ./assets
 
 USER node
 EXPOSE 3000

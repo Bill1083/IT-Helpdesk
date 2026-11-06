@@ -1,6 +1,6 @@
 'use client';
 
-import { Building2, CheckCircle2, ChevronDown, History, Loader2, MoreHorizontal, Pencil, RotateCcw, Sparkles, Trash2, User } from 'lucide-react';
+import { Building2, CheckCircle2, ChevronDown, FileDown, History, Loader2, MoreHorizontal, Pencil, RotateCcw, Sparkles, Trash2, User } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 
 import { Dropdown, type DropdownOption } from '@/components/dropdown';
 import { ErrorNotice } from '@/components/error-notice';
+import { ExportReportDialog } from '@/components/export-report';
 import { MODE_ICONS } from '@/components/mode-icon';
 import { OUTCOME_STYLE } from '@/components/outcome';
 import { ReplyComposer, type ComposerSubmit, type ReplyComposerHandle } from '@/components/reply-composer';
@@ -61,6 +62,7 @@ export function Thread({
 }) {
   const router = useRouter();
   const [problem, setProblem] = useState(initial.problem);
+  const [exporting, setExporting] = useState(false);
   const [messages, setMessages] = useState(initial.messages);
   const [similar, setSimilar] = useState(initial.similar);
   const [research, setResearch] = useState(() => toResearch(initial.problem));
@@ -342,6 +344,7 @@ export function Thread({
         environments={environments}
         onResolve={() => composer.current?.startResolve()}
         onReopen={reopen}
+        onExport={() => setExporting(true)}
         onChanged={(p) => {
           setProblem(p);
           notifyProblemsChanged();
@@ -351,6 +354,14 @@ export function Thread({
           router.push('/');
         }}
       />
+      {exporting && (
+        <ExportReportDialog
+          problemId={problem.id}
+          initialNotes={problem.reportNotes ?? ''}
+          onClose={() => setExporting(false)}
+          onSaved={(reportNotes) => setProblem((p) => ({ ...p, reportNotes: reportNotes || null }))}
+        />
+      )}
 
       <div ref={scroller} className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6 sm:py-8">
@@ -503,6 +514,7 @@ function Header({
   environments,
   onResolve,
   onReopen,
+  onExport,
   onChanged,
   onDeleted,
 }: {
@@ -511,6 +523,7 @@ function Header({
   environments: EnvironmentOption[];
   onResolve: () => void;
   onReopen: () => void;
+  onExport: () => void;
   onChanged: (problem: Problem) => void;
   onDeleted: () => void;
 }) {
@@ -645,6 +658,13 @@ function Header({
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
+        <button
+          onClick={onExport}
+          title="Export a PDF service report of this chat"
+          className="mr-1 hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 sm:flex dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+        >
+          <FileDown className="size-4" /> Export PDF
+        </button>
         {!done ? (
           <button
             onClick={onResolve}
@@ -688,6 +708,14 @@ function Header({
                     <RotateCcw className="size-4" /> Reopen
                   </MenuItem>
                 )}
+                <MenuItem
+                  onClick={() => {
+                    setMenu(false);
+                    onExport();
+                  }}
+                >
+                  <FileDown className="size-4" /> Export PDF
+                </MenuItem>
                 <MenuItem onClick={remove} danger>
                   <Trash2 className="size-4" /> Delete chat
                 </MenuItem>

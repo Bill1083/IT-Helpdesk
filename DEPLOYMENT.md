@@ -164,6 +164,13 @@ others.
 Only the owner sees Settings → Accounts and Settings → Backups; everyone else sees their own environments, "About
 you" and a "Your password" field to change it themselves.
 
+## 8. Service reports (PDF)
+
+Nothing to configure: **Export PDF** in any chat's header works once `GEMINI_API_KEY` is set (Gemini writes the
+summary; the layout is fixed in code). Set the business name printed on reports under **Settings → Service reports**
+(default "Will Harvey Tech"). To change the logo, replace `assets/brand/logo.png` (transparent PNG, about 440 x 258)
+and rebuild.
+
 ## Updating
 
 ```bash
